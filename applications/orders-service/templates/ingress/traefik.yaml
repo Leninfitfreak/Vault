@@ -1,0 +1,158 @@
+{{- if and .Values.global.active .Values.traefik.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.traefik.name }}
+  namespace: {{ include "orders-service.namespace" . }}
+  labels:
+{{ include "orders-service.componentLabels" (dict "Values" .Values "Release" .Release "Chart" .Chart "component" "ingress") | indent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Values.traefik.name }}-ingress-reader
+  namespace: {{ include "orders-service.namespace" . }}
+  labels:
+{{ include "orders-service.componentLabels" (dict "Values" .Values "Release" .Release "Chart" .Chart "component" "ingress") | indent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["services", "endpoints", "secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Values.traefik.name }}-ingress-reader
+  namespace: {{ include "orders-service.namespace" . }}
+  labels:
+{{ include "orders-service.componentLabels" (dict "Values" .Values "Release" .Release "Chart" .Chart "component" "ingress") | indent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Values.traefik.name }}-ingress-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.traefik.name }}
+    namespace: {{ include "orders-service.namespace" . }}
+---
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: {{ .Values.ingress.className }}
+  labels:
+{{ include "orders-service.componentLabels" (dict "Values" .Values "Release" .Release "Chart" .Chart "component" "ingress") | indent 4 }}
+spec:
+  controller: traefik.io/ingress-controller
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Values.traefik.name }}-cluster-ingress-reader
+  labels:
+{{ include "orders-service.componentLabels" (dict "Values" .Values "Release" .Release "Chart" .Chart "component" "ingress") | indent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingressclasses"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Values.traefik.name }}-cluster-ingress-reader
+  labels:
+{{ include "orders-service.componentLabels" (dict "Values" .Values "Release" .Release "Chart" .Chart "component" "ingress") | indent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Values.traefik.name }}-cluster-ingress-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.traefik.name }}
+    namespace: {{ include "orders-service.namespace" . }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.traefik.name }}
+  namespace: {{ include "orders-service.namespace" . }}
+  labels:
+{{ include "orders-service.componentLabels" (dict "Values" .Values "Release" .Release "Chart" .Chart "component" "ingress") | indent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: ingress
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: ingress
+        app.kubernetes.io/name: {{ .Values.traefik.name }}
+    spec:
+      serviceAccountName: {{ .Values.traefik.name }}
+      securityContext:
+{{ include "orders-service.podSecurityContext" . | indent 8 }}
+      containers:
+        - name: {{ .Values.traefik.name }}
+          image: "{{ .Values.images.traefik.repository }}:{{ .Values.images.traefik.tag }}"
+          imagePullPolicy: {{ .Values.images.traefik.pullPolicy }}
+          args:
+            - --entrypoints.web.address=:{{ .Values.traefik.containerPort }}
+            - --ping=true
+            - --ping.entrypoint=web
+            - --providers.kubernetesingress=true
+            - --providers.kubernetesingress.namespaces={{ include "orders-service.namespace" . }}
+            - --api.dashboard=false
+          ports:
+            - name: web
+              containerPort: {{ .Values.traefik.containerPort }}
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: web
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: web
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+{{ toYaml .Values.traefik.resources | indent 12 }}
+          securityContext:
+{{ include "orders-service.securityContext" . | indent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.traefik.name }}
+  namespace: {{ include "orders-service.namespace" . }}
+  labels:
+{{ include "orders-service.componentLabels" (dict "Values" .Values "Release" .Release "Chart" .Chart "component" "ingress") | indent 4 }}
+spec:
+  type: {{ .Values.traefik.serviceType }}
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: ingress
+  ports:
+    - name: web
+      port: {{ .Values.traefik.port }}
+      targetPort: web
+{{- end }}

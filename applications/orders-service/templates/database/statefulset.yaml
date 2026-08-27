@@ -1,0 +1,81 @@
+{{- if .Values.global.active }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Values.postgresql.name }}
+  namespace: {{ include "orders-service.namespace" . }}
+  labels:
+{{ include "orders-service.componentLabels" (dict "Values" .Values "Release" .Release "Chart" .Chart "component" "database") | indent 4 }}
+spec:
+  serviceName: {{ .Values.postgresql.name }}
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: database
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: database
+        app.kubernetes.io/name: {{ .Values.postgresql.name }}
+    spec:
+      serviceAccountName: {{ .Values.postgresql.name }}
+      securityContext:
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: {{ .Values.postgresql.name }}
+          image: "{{ .Values.images.postgresql.repository }}:{{ .Values.images.postgresql.tag }}"
+          imagePullPolicy: {{ .Values.images.postgresql.pullPolicy }}
+          ports:
+            - name: postgresql
+              containerPort: {{ .Values.postgresql.port }}
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.postgresql.database | quote }}
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.ordersCredentials.name }}
+                  key: DB_USERNAME
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.ordersCredentials.name }}
+                  key: DB_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: postgresql
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+{{ toYaml .Values.postgresql.resources | indent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+{{ include "orders-service.componentLabels" (dict "Values" .Values "Release" .Release "Chart" .Chart "component" "database") | indent 10 }}
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ .Values.postgresql.storage.size }}
+{{- end }}

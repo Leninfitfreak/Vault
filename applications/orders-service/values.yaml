@@ -1,0 +1,109 @@
+global:
+  applicationName: orders-service
+  namespace: orders
+  environment: shared
+  clusterRole: shared
+  active: true
+  managedBy: helm
+  labels:
+    app.kubernetes.io/part-of: orders-service
+    platform.hashicorp.com/phase: "1"
+    platform.hashicorp.com/secret-state: kubernetes-secrets
+
+images:
+  application:
+    repository: python
+    tag: "3.13-alpine"
+    pullPolicy: IfNotPresent
+  postgresql:
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+  traefik:
+    repository: traefik
+    tag: "v3.6"
+    pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true
+
+secrets:
+  create: true
+  ordersCredentials:
+    name: orders-service-credentials
+    apiKey: fake-local-orders-api-key
+    databaseUsername: orders_user
+    databasePassword: fake-local-orders-password
+  externalCredentials:
+    name: external-service-credentials
+    externalApiToken: fake-local-external-api-token
+
+frontend:
+  name: frontend-service
+  replicas: 1
+  port: 8080
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+
+orders:
+  name: orders-service
+  replicas: 1
+  port: 8080
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+
+consumer:
+  name: consumer-service
+  replicas: 1
+  port: 8080
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+
+postgresql:
+  name: postgresql
+  database: orders
+  port: 5432
+  storage:
+    enabled: true
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+ingress:
+  enabled: true
+  className: traefik
+  host: orders.local
+
+traefik:
+  enabled: true
+  name: traefik
+  serviceType: NodePort
+  port: 80
+  containerPort: 8000
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi

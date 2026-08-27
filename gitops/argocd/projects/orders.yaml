@@ -1,0 +1,48 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: orders
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: orders
+    app.kubernetes.io/part-of: gitops-control-plane
+    platform.hashicorp.com/phase: "2"
+spec:
+  description: Orders application environments managed by Argo CD.
+  sourceRepos:
+    - https://github.com/Leninfitfreak/Vault.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: orders
+    - name: vault-dr
+      namespace: orders
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    - group: networking.k8s.io
+      kind: IngressClass
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: ConfigMap
+    - group: ""
+      kind: PersistentVolumeClaim
+    - group: ""
+      kind: Secret
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: ServiceAccount
+    - group: apps
+      kind: Deployment
+    - group: apps
+      kind: StatefulSet
+    - group: networking.k8s.io
+      kind: Ingress
+    - group: rbac.authorization.k8s.io
+      kind: Role
+    - group: rbac.authorization.k8s.io
+      kind: RoleBinding

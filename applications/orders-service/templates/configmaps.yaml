@@ -1,0 +1,134 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.frontend.name }}-app
+  namespace: {{ include "orders-service.namespace" . }}
+  labels:
+{{ include "orders-service.componentLabels" (dict "Values" .Values "Release" .Release "Chart" .Chart "component" "frontend") | indent 4 }}
+data:
+  server.py: |
+    import json
+    import os
+    import urllib.request
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    orders_url = os.getenv("ORDERS_SERVICE_URL", "http://orders-service:8080")
+
+    class Handler(BaseHTTPRequestHandler):
+        def _send(self, code, payload):
+            body = json.dumps(payload).encode()
+            self.send_response(code)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            if self.path == "/health":
+                self._send(200, {"service": "frontend-service", "status": "ok"})
+                return
+            try:
+                with urllib.request.urlopen(f"{orders_url}/orders", timeout=3) as response:
+                    orders = json.loads(response.read().decode())
+                self._send(200, {"service": "frontend-service", "orders_service": orders})
+            except Exception as exc:
+                self._send(503, {"service": "frontend-service", "orders_service_error": str(exc)})
+
+    HTTPServer(("", 8080), Handler).serve_forever()
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.orders.name }}-app
+  namespace: {{ include "orders-service.namespace" . }}
+  labels:
+{{ include "orders-service.componentLabels" (dict "Values" .Values "Release" .Release "Chart" .Chart "component" "orders") | indent 4 }}
+data:
+  server.py: |
+    import json
+    import os
+    import socket
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    def database_probe():
+        host = os.getenv("POSTGRESQL_HOST", "postgresql")
+        port = int(os.getenv("POSTGRESQL_PORT", "5432"))
+        with socket.create_connection((host, port), timeout=3):
+            return {"host": host, "port": port, "tcp_connectivity": "ok"}
+
+    class Handler(BaseHTTPRequestHandler):
+        def _send(self, code, payload):
+            body = json.dumps(payload).encode()
+            self.send_response(code)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            if self.path == "/health":
+                self._send(200, {
+                    "service": "orders-service",
+                    "status": "ok",
+                    "api_key_present": bool(os.getenv("API_KEY")),
+                    "database_username_present": bool(os.getenv("DB_USERNAME")),
+                })
+                return
+            if self.path == "/database":
+                try:
+                    self._send(200, {"service": "orders-service", "database": database_probe()})
+                except Exception as exc:
+                    self._send(503, {"service": "orders-service", "database_error": str(exc)})
+                return
+            if self.path == "/orders":
+                self._send(200, {
+                    "service": "orders-service",
+                    "orders": [{"id": "order-1001", "status": "created"}],
+                    "secret_source": "kubernetes-secret",
+                    "database": database_probe(),
+                })
+                return
+            self._send(404, {"error": "not found"})
+
+    HTTPServer(("", 8080), Handler).serve_forever()
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.consumer.name }}-app
+  namespace: {{ include "orders-service.namespace" . }}
+  labels:
+{{ include "orders-service.componentLabels" (dict "Values" .Values "Release" .Release "Chart" .Chart "component" "consumer") | indent 4 }}
+data:
+  server.py: |
+    import json
+    import os
+    import urllib.request
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    orders_url = os.getenv("ORDERS_SERVICE_URL", "http://orders-service:8080")
+
+    class Handler(BaseHTTPRequestHandler):
+        def _send(self, code, payload):
+            body = json.dumps(payload).encode()
+            self.send_response(code)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            if self.path == "/health":
+                self._send(200, {"service": "consumer-service", "status": "ok"})
+                return
+            if self.path == "/call-orders":
+                try:
+                    with urllib.request.urlopen(f"{orders_url}/orders", timeout=3) as response:
+                        payload = json.loads(response.read().decode())
+                    self._send(200, {"service": "consumer-service", "orders_service": payload})
+                except Exception as exc:
+                    self._send(503, {"service": "consumer-service", "orders_service_error": str(exc)})
+                return
+            self._send(404, {"error": "not found"})
+
+    HTTPServer(("", 8080), Handler).serve_forever()

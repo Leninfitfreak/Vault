@@ -1,0 +1,14 @@
+global:
+  environment: recovery
+  clusterRole: recovery
+  active: false
+
+ingress:
+  enabled: false
+
+traefik:
+  enabled: false
+
+postgresql:
+  storage:
+    size: 1Gi

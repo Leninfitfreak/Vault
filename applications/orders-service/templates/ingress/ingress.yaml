@@ -1,0 +1,22 @@
+{{- if and .Values.global.active .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.frontend.name }}
+  namespace: {{ include "orders-service.namespace" . }}
+  labels:
+{{ include "orders-service.componentLabels" (dict "Values" .Values "Release" .Release "Chart" .Chart "component" "ingress") | indent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Values.frontend.name }}
+                port:
+                  number: {{ .Values.frontend.port }}
+{{- end }}

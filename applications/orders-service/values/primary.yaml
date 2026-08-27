@@ -1,0 +1,7 @@
+global:
+  environment: primary
+  clusterRole: primary
+  active: true
+
+ingress:
+  host: orders.primary.local

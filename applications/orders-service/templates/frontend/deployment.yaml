@@ -1,0 +1,63 @@
+{{- if .Values.global.active }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.frontend.name }}
+  namespace: {{ include "orders-service.namespace" . }}
+  labels:
+{{ include "orders-service.componentLabels" (dict "Values" .Values "Release" .Release "Chart" .Chart "component" "frontend") | indent 4 }}
+spec:
+  replicas: {{ .Values.frontend.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: frontend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: frontend
+        app.kubernetes.io/name: {{ .Values.frontend.name }}
+    spec:
+      serviceAccountName: {{ .Values.frontend.name }}
+      securityContext:
+{{ include "orders-service.podSecurityContext" . | indent 8 }}
+      containers:
+        - name: {{ .Values.frontend.name }}
+          image: "{{ .Values.images.application.repository }}:{{ .Values.images.application.tag }}"
+          imagePullPolicy: {{ .Values.images.application.pullPolicy }}
+          command: ["python", "/app/server.py"]
+          ports:
+            - name: http
+              containerPort: {{ .Values.frontend.port }}
+          env:
+            - name: ORDERS_SERVICE_URL
+              value: http://{{ .Values.orders.name }}:{{ .Values.orders.port }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+{{ toYaml .Values.frontend.resources | indent 12 }}
+          securityContext:
+{{ include "orders-service.securityContext" . | indent 12 }}
+          volumeMounts:
+            - name: app
+              mountPath: /app
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: app
+          configMap:
+            name: {{ .Values.frontend.name }}-app
+        - name: tmp
+          emptyDir: {}
+{{- end }}

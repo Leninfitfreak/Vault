@@ -1,0 +1,80 @@
+{{- if .Values.global.active }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.orders.name }}
+  namespace: {{ include "orders-service.namespace" . }}
+  labels:
+{{ include "orders-service.componentLabels" (dict "Values" .Values "Release" .Release "Chart" .Chart "component" "orders") | indent 4 }}
+spec:
+  replicas: {{ .Values.orders.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: orders
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: orders
+        app.kubernetes.io/name: {{ .Values.orders.name }}
+    spec:
+      serviceAccountName: {{ .Values.orders.name }}
+      securityContext:
+{{ include "orders-service.podSecurityContext" . | indent 8 }}
+      containers:
+        - name: {{ .Values.orders.name }}
+          image: "{{ .Values.images.application.repository }}:{{ .Values.images.application.tag }}"
+          imagePullPolicy: {{ .Values.images.application.pullPolicy }}
+          command: ["python", "/app/server.py"]
+          ports:
+            - name: http
+              containerPort: {{ .Values.orders.port }}
+          env:
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.ordersCredentials.name }}
+                  key: API_KEY
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.ordersCredentials.name }}
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.ordersCredentials.name }}
+                  key: DB_PASSWORD
+            - name: POSTGRESQL_HOST
+              value: {{ .Values.postgresql.name }}
+            - name: POSTGRESQL_PORT
+              value: {{ .Values.postgresql.port | quote }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+{{ toYaml .Values.orders.resources | indent 12 }}
+          securityContext:
+{{ include "orders-service.securityContext" . | indent 12 }}
+          volumeMounts:
+            - name: app
+              mountPath: /app
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: app
+          configMap:
+            name: {{ .Values.orders.name }}-app
+        - name: tmp
+          emptyDir: {}
+{{- end }}

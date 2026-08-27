@@ -1,0 +1,18 @@
+{{- if .Values.global.active }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.frontend.name }}
+  namespace: {{ include "orders-service.namespace" . }}
+  labels:
+{{ include "orders-service.componentLabels" (dict "Values" .Values "Release" .Release "Chart" .Chart "component" "frontend") | indent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: frontend
+  ports:
+    - name: http
+      port: {{ .Values.frontend.port }}
+      targetPort: http
+{{- end }}

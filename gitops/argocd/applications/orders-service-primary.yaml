@@ -1,0 +1,31 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: orders-service-primary
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: orders-service
+    app.kubernetes.io/part-of: gitops-control-plane
+    platform.hashicorp.com/environment: primary
+    platform.hashicorp.com/phase: "2"
+spec:
+  project: orders
+  source:
+    repoURL: https://github.com/Leninfitfreak/Vault.git
+    targetRevision: main
+    path: applications/orders-service
+    helm:
+      releaseName: orders-service
+      valueFiles:
+        - values/primary.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: orders
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true
+      - ServerSideApply=true
