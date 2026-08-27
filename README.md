@@ -48,6 +48,8 @@ Argo CD is bootstrapped once into `vault-primary` as the local management cluste
 
 Routine desired-state changes should be made in Git and reconciled by Argo CD. Direct Helm commands remain useful for linting and rendering, but are no longer the normal deployment path after Argo CD ownership is active.
 
+Phase 2 verification completed with `origin/main` published and both Argo CD Applications reporting `Synced` and `Healthy`. Automated self-healing was verified by temporarily scaling `frontend-service` to 2 replicas and watching Argo CD restore the Git-desired count of 1. Automated pruning was verified with a temporary non-sensitive ConfigMap, which Argo CD created from Git and pruned after it was removed from Git.
+
 ## Included In Phase 1
 
 - Helm chart for `frontend-service`, `orders-service`, `consumer-service`, and `postgresql`

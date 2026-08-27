@@ -68,14 +68,19 @@ Primary release:
 
 - Release: `orders-service`
 - Context: `vault-primary`
-- Status: deployed
-- Revision: `5`
+- Status: managed by Argo CD
+- Argo CD Application: `orders-service-primary`
+- Sync: `Synced`
+- Health: `Healthy`
 
 Recovery release:
 
 - Release: `orders-service`
 - Context: `vault-dr`
-- Status: deployed
+- Status: managed by Argo CD
+- Argo CD Application: `orders-service-recovery`
+- Sync: `Synced`
+- Health: `Healthy`
 - Workloads: inactive, no pods
 
 Primary workload status:
@@ -296,10 +301,16 @@ Why GitOps comes before Vault:
 - Argo CD provides a controlled reconciliation path before those future security components are introduced.
 - This keeps later Vault changes reviewable as Git changes rather than ad hoc cluster mutations.
 
-Current Phase 2 blocker:
+Phase 2 verification results:
 
-- The repository remote is configured as `https://github.com/Leninfitfreak/Vault.git`, but no `main` branch head was visible during verification and the current repository contents were not yet published.
-- Argo CD cannot complete Application sync, self-healing, or pruning tests until the desired state exists in the configured Git repository.
+- `origin/main` was published successfully to `https://github.com/Leninfitfreak/Vault.git`.
+- Final verified Git revision: `fdb63bfaf8bb93ec4ca536677616a0ca2b4cfb29`.
+- `orders-service-primary`: `Synced` and `Healthy`.
+- `orders-service-recovery`: `Synced` and `Healthy`; recovery remained inactive as designed.
+- Self-healing test: `frontend-service` was manually scaled to 2 replicas; Argo CD detected `OutOfSync` and restored the Git-desired 1 replica.
+- Pruning test: a temporary `gitops-prune-verification` ConfigMap was added through the Helm chart and created by Argo CD, then removed from Git and automatically pruned by Argo CD.
+- Application regression passed after GitOps ownership: `frontend-service` -> `orders-service`, `consumer-service` -> `orders-service`, `orders-service` -> PostgreSQL, and Traefik ingress HTTP 200.
+- Existing Kubernetes Secrets remained present and Secret values were not displayed.
 
 Future Vault migration model:
 
