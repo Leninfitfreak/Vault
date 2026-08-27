@@ -73,7 +73,9 @@ spec:
             - name: data
               mountPath: /var/lib/postgresql/data
   volumeClaimTemplates:
-    - metadata:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
         name: data
         labels:
 {{ include "orders-service.componentLabels" (dict "Values" .Values "Release" .Release "Chart" .Chart "component" "database") | indent 10 }}
@@ -83,6 +85,7 @@ spec:
         resources:
           requests:
             storage: {{ .Values.postgresql.storage.size }}
+        volumeMode: Filesystem
   updateStrategy:
     rollingUpdate:
       maxUnavailable: 1
