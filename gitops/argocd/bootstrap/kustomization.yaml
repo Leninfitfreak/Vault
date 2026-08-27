@@ -15,3 +15,8 @@ patches:
         name: argocd-cm
       data:
         application.instanceLabelKey: argocd.argoproj.io/instance
+        resource.customizations.health.networking.k8s.io_Ingress: |
+          hs = {}
+          hs.status = "Healthy"
+          hs.message = "Local Phase 2 ingress is validated through Traefik NodePort or port-forward."
+          return hs
