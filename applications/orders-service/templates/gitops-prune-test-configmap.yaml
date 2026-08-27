@@ -1,0 +1,11 @@
+{{- if .Values.global.active }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitops-prune-verification
+  namespace: {{ include "orders-service.namespace" . }}
+  labels:
+{{ include "orders-service.componentLabels" (dict "Values" .Values "Release" .Release "Chart" .Chart "component" "gitops-verification") | indent 4 }}
+data:
+  purpose: phase-2-prune-verification
+{{- end }}
