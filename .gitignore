@@ -3,3 +3,6 @@
 tmp/
 .tmp/
 *.tgz
+vault-init*.json
+vault-unseal*.txt
+vault-root-token*.txt

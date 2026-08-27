@@ -1,0 +1,15 @@
+vault:
+  global:
+    enabled: false
+    namespace: vault
+
+  server:
+    enabled: false
+    ha:
+      enabled: false
+      replicas: 0
+      raft:
+        enabled: false
+
+  ui:
+    enabled: false

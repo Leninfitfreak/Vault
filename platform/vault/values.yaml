@@ -1,0 +1,103 @@
+vault:
+  global:
+    enabled: true
+    tlsDisable: true
+
+  injector:
+    enabled: false
+
+  csi:
+    enabled: false
+
+  server:
+    enabled: true
+    image:
+      repository: hashicorp/vault
+      tag: 2.0.4
+      pullPolicy: IfNotPresent
+    updateStrategyType: RollingUpdate
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    readinessProbe:
+      enabled: true
+      path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
+    livenessProbe:
+      enabled: true
+      path: /v1/sys/health?standbyok=true
+      initialDelaySeconds: 60
+    dataStorage:
+      enabled: true
+      size: 1Gi
+      mountPath: /vault/data
+      storageClass: null
+      accessMode: ReadWriteOnce
+    auditStorage:
+      enabled: false
+    standalone:
+      enabled: false
+    dev:
+      enabled: false
+    ha:
+      enabled: true
+      replicas: 3
+      disruptionBudget:
+        enabled: true
+        maxUnavailable: 1
+      raft:
+        enabled: true
+        setNodeId: true
+        config: |
+          ui = true
+
+          listener "tcp" {
+            tls_disable = 1
+            address = "[::]:8200"
+            cluster_address = "[::]:8201"
+          }
+
+          storage "raft" {
+            path = "/vault/data"
+
+            retry_join {
+              leader_api_addr = "http://vault-0.vault-internal:8200"
+            }
+
+            retry_join {
+              leader_api_addr = "http://vault-1.vault-internal:8200"
+            }
+
+            retry_join {
+              leader_api_addr = "http://vault-2.vault-internal:8200"
+            }
+          }
+
+          service_registration "kubernetes" {}
+    affinity: |
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: {{ template "vault.name" . }}
+                  app.kubernetes.io/instance: "{{ .Release.Name }}"
+                  component: server
+              topologyKey: kubernetes.io/hostname
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: vault
+            app.kubernetes.io/instance: vault
+            component: server
+
+  ui:
+    enabled: true
+    serviceType: ClusterIP

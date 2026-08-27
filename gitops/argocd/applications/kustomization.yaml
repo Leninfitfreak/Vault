@@ -3,3 +3,5 @@ kind: Kustomization
 resources:
   - orders-service-primary.yaml
   - orders-service-recovery.yaml
+  - vault-primary.yaml
+  - vault-recovery.yaml

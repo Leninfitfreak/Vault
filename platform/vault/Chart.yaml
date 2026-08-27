@@ -1,0 +1,10 @@
+apiVersion: v2
+name: vault-platform
+description: GitOps wrapper for the official HashiCorp Vault Helm chart.
+type: application
+version: 0.1.0
+appVersion: 2.0.4
+dependencies:
+  - name: vault
+    version: 0.34.1
+    repository: https://helm.releases.hashicorp.com
