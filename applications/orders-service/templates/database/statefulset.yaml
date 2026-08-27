@@ -7,6 +7,11 @@ metadata:
   labels:
 {{ include "orders-service.componentLabels" (dict "Values" .Values "Release" .Release "Chart" .Chart "component" "database") | indent 4 }}
 spec:
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  podManagementPolicy: OrderedReady
+  revisionHistoryLimit: 10
   serviceName: {{ .Values.postgresql.name }}
   replicas: 1
   selector:
@@ -78,4 +83,9 @@ spec:
         resources:
           requests:
             storage: {{ .Values.postgresql.storage.size }}
+  updateStrategy:
+    rollingUpdate:
+      maxUnavailable: 1
+      partition: 0
+    type: RollingUpdate
 {{- end }}
