@@ -304,7 +304,7 @@ Why GitOps comes before Vault:
 Phase 2 verification results:
 
 - `origin/main` was published successfully to `https://github.com/Leninfitfreak/Vault.git`.
-- Final verified Git revision: `fdb63bfaf8bb93ec4ca536677616a0ca2b4cfb29`.
+- Final application-test Git revision before the documentation-only update: `fdb63bfaf8bb93ec4ca536677616a0ca2b4cfb29`.
 - `orders-service-primary`: `Synced` and `Healthy`.
 - `orders-service-recovery`: `Synced` and `Healthy`; recovery remained inactive as designed.
 - Self-healing test: `frontend-service` was manually scaled to 2 replicas; Argo CD detected `OutOfSync` and restored the Git-desired 1 replica.
