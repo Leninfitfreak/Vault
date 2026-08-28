@@ -6,3 +6,11 @@ tmp/
 vault-init*.json
 vault-unseal*.txt
 vault-root-token*.txt
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+.env
+.env.*
+*.secret
+*.credentials

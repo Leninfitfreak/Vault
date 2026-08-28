@@ -733,6 +733,297 @@ The installed Helm binary was invoked directly from the Winget package path for 
 Lesson:
 The reusable values model should be validated with rendering before GitOps reconciliation, especially around StatefulSet-backed systems like Vault where accidental pod-template or PVC changes can trigger operational work.
 
+## Phase 5 Vault Configuration As Code With Terraform
+
+Phase 5 introduces Terraform as the declarative owner for approved Vault logical configuration. It does not change the Kubernetes runtime ownership model.
+
+Ownership boundary:
+
+```text
+Git + Argo CD + Helm
+        |
+        v
+Kubernetes runtime infrastructure
+        |
+        v
+Vault StatefulSet, Services, PVCs, ConfigMaps, RBAC
+
+Terraform
+        |
+        v
+Vault logical configuration
+```
+
+Terraform must not manage the Vault Helm release, Vault StatefulSet, Kubernetes Services, PVCs, Argo CD Applications, or `orders-service` Kubernetes resources.
+
+### Terraform Structure
+
+Final Terraform structure:
+
+```text
+platform/vault/terraform/
+  README.md
+  modules/
+    policies/
+      main.tf
+      outputs.tf
+      variables.tf
+  environments/
+    dev/
+      main.tf
+      outputs.tf
+      providers.tf
+      terraform.tfvars
+      versions.tf
+      variables.tf
+    qa/
+      main.tf
+      outputs.tf
+      providers.tf
+      terraform.tfvars
+      versions.tf
+      variables.tf
+    primary/
+      .terraform.lock.hcl
+      main.tf
+      outputs.tf
+      providers.tf
+      terraform.tfvars
+      versions.tf
+      variables.tf
+    recovery/
+      main.tf
+      outputs.tf
+      providers.tf
+      terraform.tfvars
+      versions.tf
+      variables.tf
+```
+
+The only populated shared module is `modules/policies`, because Phase 5 needed one real, low-risk proof resource. Namespaces were not implemented because Vault OSS does not support Vault namespaces. Auth and mounts modules are deferred until a later approved phase introduces those capabilities.
+
+### Versioning
+
+Validation used:
+
+- Terraform CLI: `v1.14.8`
+- Required Terraform version: `>= 1.14.0, < 2.0.0`
+- Vault provider source: `hashicorp/vault`
+- Vault provider version: `= 5.11.0`
+
+`.terraform.lock.hcl` is committed for each environment root to keep provider selection deterministic. `.terraform/`, state files, and plan files are ignored.
+
+### Authentication Model
+
+Local bootstrap:
+
+```text
+protected local root/admin token
+        |
+        v
+VAULT_TOKEN environment variable
+        |
+        v
+Terraform provider
+```
+
+The token is not committed, echoed, printed, placed in tfvars, stored in scripts, or stored in Kubernetes manifests. The Phase 3 root token remains a bootstrap/emergency credential and was not revoked in Phase 5.
+
+Production target:
+
+```text
+CI/CD or operator workload identity
+        |
+        v
+Vault auth method
+        |
+        v
+short-lived token
+        |
+        v
+least-privilege Terraform policy
+```
+
+That production identity model is documented but not implemented in Phase 5.
+
+### State Security
+
+Local state was used for the primary environment in Phase 5. Terraform state and plan files are treated as sensitive and are excluded from Git.
+
+Production must use an encrypted remote backend with locking, access control, auditability, and backup/versioning. Suitable future backend families include Terraform Cloud/Enterprise, S3 with locking, Azure Storage, or GCS.
+
+Targeted state inspection after apply found no:
+
+- Vault root-token pattern
+- unseal-key pattern
+- encoded-token pattern
+- application password markers
+- application API token markers
+- private-key marker
+
+### Environment Model
+
+Environment behavior:
+
+- `dev`: static validation only, no live apply
+- `qa`: static validation only, no live apply
+- `primary`: only live Phase 5 target
+- `recovery`: staged only, no live apply
+
+Recovery Terraform configuration exists for structure and future automation, but Phase 5 did not apply logical configuration to a recovery Vault instance.
+
+### Phase 5 Proof Resource
+
+Terraform manages one safe Vault logical resource:
+
+- Type: `vault_policy`
+- Name: `platform-readiness`
+- Purpose: prove Terraform can own harmless Vault logical configuration
+- Policy: read-only access to `sys/health`
+- Secret data: none
+
+No KV engine, database secrets engine, PKI, Kubernetes Auth, application policy, or application secret was created.
+
+### Terraform Workflow Results
+
+Primary workflow:
+
+- `terraform fmt -check`: pass
+- `terraform init`: pass
+- `terraform validate`: pass
+- `terraform providers`: `registry.terraform.io/hashicorp/vault` version `5.11.0`
+- Initial plan: 1 resource to add, `platform-readiness`
+- Apply: pass
+- Second plan: no changes
+
+Dev, QA, and recovery static validation:
+
+- `terraform init -backend=false`: pass
+- `terraform validate`: pass
+
+Drift test:
+
+- Object changed outside Terraform: `platform-readiness`
+- Manual drift: added a non-secret extra capability to the same harmless policy
+- Drift detected: yes, Terraform plan returned detailed exit code `2`
+- Restore: Terraform applied the saved restore plan
+- Final plan: no changes, detailed exit code `0`
+
+### Existing Logical Configuration
+
+Existing Vault policy names observed:
+
+- `default`
+- `default-ceiling`
+- `platform-readiness`
+- `root`
+
+Terraform-owned object:
+
+- `platform-readiness`
+
+Manual operational state not managed by Terraform:
+
+- Vault initialization
+- Shamir unseal keys
+- root token
+- Raft peers and leadership
+- Kubernetes runtime resources
+
+### Runtime Regression
+
+Vault primary after Terraform:
+
+- Argo CD sync: `Synced`
+- Argo CD health: `Healthy`
+- Replicas: 3
+- Pods: running
+- Unsealed: yes
+- HA: enabled
+- Raft peers: 3
+- Leader: `vault-0`
+- Followers: `vault-1`, `vault-2`
+- Reinitialized: no
+
+Vault recovery:
+
+- Argo CD sync: `Synced`
+- Argo CD health: `Healthy`
+- State: staged/inactive
+- Terraform applied live: no
+- Primary data restored: no
+
+Application regression after Terraform:
+
+- `frontend-service` -> `orders-service`: HTTP 200
+- `consumer-service` -> `orders-service`: HTTP 200
+- `orders-service` -> PostgreSQL: HTTP 200 and TCP connectivity succeeded
+- Traefik ingress with `orders.primary.local`: HTTP 200
+- Application-reported secret source: `kubernetes-secret`
+
+Application Kubernetes Secrets remained present by metadata:
+
+- `external-service-credentials`: `Opaque`, 1 data key
+- `orders-service-credentials`: `Opaque`, 3 data keys
+
+### Security Review
+
+Confirmed:
+
+- root token in Git: no
+- unseal keys in Git: no
+- Terraform state in Git: no
+- application secrets in Terraform: no
+- private keys in Git: no
+- sensitive outputs: no
+- sensitive values printed in Phase 5: no
+
+Phase 5 `.gitignore` additions:
+
+- `.terraform/`
+- `*.tfstate`
+- `*.tfstate.*`
+- `*.tfplan`
+- `.env`
+- `.env.*`
+- `*.secret`
+- `*.credentials`
+
+### Future Project Input Model
+
+Later phases can add data-driven application onboarding without changing shared module internals. A future input model may look like:
+
+```hcl
+applications = {
+  payment_service = {
+    namespace       = "payments"
+    service_account = "payment-service"
+  }
+}
+```
+
+This concept is documented only. No application auth role, policy, KV secret, or secret migration was implemented.
+
+### Problems And Lessons
+
+Problem:
+The Terraform provider download initially failed under the restricted network sandbox.
+
+Root cause:
+Terraform needed network access to query `registry.terraform.io` and install the pinned provider.
+
+Resolution:
+Terraform init was rerun with approved network access and installed `hashicorp/vault v5.11.0`.
+
+Problem:
+Terraform `plan -out=phase5.tfplan` was rejected by the local CLI invocation, while `plan -out phase5.tfplan` worked.
+
+Resolution:
+The space-separated `-out phase5.tfplan` form was used for saved plans.
+
+Lesson:
+Terraform is now cleanly separated from Kubernetes runtime reconciliation. Argo CD owns Vault runtime state; Terraform owns only explicitly approved Vault logical objects.
+
 Future Vault migration model:
 
 ```text

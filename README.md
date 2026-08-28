@@ -106,6 +106,33 @@ The shared Vault defaults stay in `platform/vault/values.yaml`. Environment over
 
 The same chart remains independent of `orders-service`; application onboarding is deferred. Current local values keep Vault server TLS disabled only for Minikube validation, while the documented production model requires TLS and auto-unseal through an external KMS or HSM.
 
+## Vault Configuration As Code
+
+Phase 5 introduces Terraform for Vault logical configuration while keeping Argo CD and Helm responsible for Kubernetes runtime reconciliation.
+
+```text
+                        Git
+                         |
+             +-----------+-----------+
+             |                       |
+             v                       v
+          Argo CD                 Terraform
+             |                       |
+             v                       v
+            Helm             Vault logical config
+             |                       |
+             v                       |
+        Kubernetes                   |
+             |                       |
+             +---------> Vault <-----+
+                         |
+                    Integrated Raft
+```
+
+Terraform configuration lives under `platform/vault/terraform`. The first live proof resource is a harmless Vault policy named `platform-readiness`, which grants only read access to `sys/health` and contains no secret data.
+
+Terraform local bootstrap authentication uses externally supplied `VAULT_ADDR` and `VAULT_TOKEN` values. Tokens, unseal keys, Terraform state, plan files, and local environment files are excluded from Git. The provider lock file is committed for deterministic provider selection.
+
 ## Included In Phase 1
 
 - Helm chart for `frontend-service`, `orders-service`, `consumer-service`, and `postgresql`
