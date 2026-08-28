@@ -312,6 +312,193 @@ Phase 2 verification results:
 - Application regression passed after GitOps ownership: `frontend-service` -> `orders-service`, `consumer-service` -> `orders-service`, `orders-service` -> PostgreSQL, and Traefik ingress HTTP 200.
 - Existing Kubernetes Secrets remained present and Secret values were not displayed.
 
+## Phase 3 Vault HA Raft Foundation
+
+Phase 3 installs HashiCorp Vault as a GitOps-managed platform component without migrating application secrets.
+
+Vault platform source:
+
+- Wrapper chart: `platform/vault`
+- Upstream chart: official HashiCorp `vault` Helm chart
+- Chart version: `0.34.1`
+- Vault image: `hashicorp/vault:2.0.4`
+- Primary Argo CD Application: `vault-primary`
+- Recovery Argo CD Application: `vault-recovery`
+- AppProject: `platform`
+
+Primary Vault runtime:
+
+- Namespace: `vault`
+- Replicas: 3
+- Storage: integrated Raft
+- PVCs: `data-vault-0`, `data-vault-1`, `data-vault-2`
+- PVC size: 1Gi each
+- PDB: `maxUnavailable: 1`
+- UI service: internal `ClusterIP`
+- Injector: disabled
+- CSI: disabled
+- Local TLS: disabled only for the Minikube lab
+
+Production target:
+
+- TLS enabled for API and cluster traffic
+- Auto-unseal through a cloud KMS or HSM
+- Root-token use replaced by a proper administrator authentication method and policies
+
+### Approved Vault-Only Reset
+
+Vault administrative access was lost during initial Phase 3 troubleshooting because a replacement root token was created as a child token and then revoked with its parent. The lesson is that Vault token hierarchy matters: revoking a parent token also revokes non-orphan child tokens. Phase 3 now preserves the newly generated root token only for remaining administrative verification and does not revoke it during this phase.
+
+An approved Vault-only data reset was performed. The reset scope was limited to:
+
+- Vault StatefulSet runtime
+- Vault server pods
+- Vault data PVCs `data-vault-0`, `data-vault-1`, and `data-vault-2`
+- Vault initialization state
+
+The reset did not affect:
+
+- Argo CD
+- `vault-primary` cluster
+- `vault-dr` cluster
+- `orders-service`
+- PostgreSQL/application PVC `orders/data-postgresql-0`
+- application Kubernetes Secrets
+- Traefik
+- non-Vault Argo CD Applications
+
+Before deletion, the Vault StatefulSet was confirmed to use volume claim template `data`, and the pods mounted:
+
+- `vault-0` -> `data-vault-0`
+- `vault-1` -> `data-vault-1`
+- `vault-2` -> `data-vault-2`
+
+Only those three exact Vault PVC names were deleted. No broad PVC selector was used.
+
+### Reinitialization And Unseal
+
+Vault was reinitialized exactly once after the reset:
+
+- Initialization: completed
+- Key shares: 5
+- Threshold: 3
+- Initialization material location: outside the repository under the local user profile
+- Initialization material committed to Git: no
+- Root token committed to Git: no
+- Unseal keys committed to Git: no
+
+All three Vault pods were securely unsealed:
+
+- `vault-0`: initialized, unsealed, Raft storage, HA enabled
+- `vault-1`: initialized, unsealed, Raft storage, HA enabled
+- `vault-2`: initialized, unsealed, Raft storage, HA enabled
+
+### Raft Verification
+
+`vault operator raft list-peers` was verified using the protected administrative token. Only non-sensitive peer metadata was recorded:
+
+- `vault-0` at `vault-0.vault-internal:8201`: leader, voter
+- `vault-1` at `vault-1.vault-internal:8201`: follower, voter
+- `vault-2` at `vault-2.vault-internal:8201`: follower, voter
+
+Expected HA/Raft model was met:
+
+- Peers: 3
+- Leaders: 1
+- Followers: 2
+- Voters: 3
+
+### Persistence And HA Tests
+
+Standby persistence test:
+
+- Restarted standby: `vault-1`
+- PVC before restart: `pvc-12ee12c1-4216-4304-8711-254f252fa3bd`
+- PVC after restart: `pvc-12ee12c1-4216-4304-8711-254f252fa3bd`
+- PVC retained: yes
+- Shamir unseal after restart: required and completed
+- Peer rejoined: yes
+
+Leader resilience test:
+
+- Restarted leader: `vault-0`
+- A different peer became leader during disruption
+- `vault-0` recovered and was securely unsealed
+- Final peers: 3
+- Final voters: 3
+- Final observed leader after the full cluster restart/unseal check: `vault-0`
+
+Because the local lab uses Shamir sealing, Vault pods require manual unseal after restarts. Production should use auto-unseal.
+
+### Argo CD Self-Heal
+
+Vault GitOps self-healing was verified with a metadata-only drift on the `vault` Service:
+
+- Drift: changed managed metadata label `app.kubernetes.io/name` from `vault` to `vault-drift`
+- Detection: `vault-primary` reported `OutOfSync` and `Healthy`
+- Self-heal: Argo CD restored the label to `vault`
+- Final state: `vault-primary` returned to `Synced` and `Healthy`
+
+The self-heal test did not modify Vault PVCs, data, Secrets, initialization state, seal state, or Raft configuration.
+
+### Recovery State
+
+`vault-recovery` remains only a declarative recovery runtime definition:
+
+- Argo CD sync: `Synced`
+- Argo CD health: `Healthy`
+- Primary data restored to recovery: no
+- Snapshot restore implemented: no
+- Failover implemented: no
+- Independent recovery Vault initialized: no
+
+### Application Regression After Vault
+
+The existing application remained unaffected:
+
+- `frontend-service` -> `orders-service`: HTTP 200
+- `consumer-service` -> `orders-service`: HTTP 200
+- `orders-service` -> PostgreSQL: HTTP 200 and TCP connectivity succeeded
+- Traefik ingress using `orders.primary.local`: HTTP 200
+- Application-reported secret source: `kubernetes-secret`
+
+Application Kubernetes Secrets remained present:
+
+- `external-service-credentials`: `Opaque`, 1 data key
+- `orders-service-credentials`: `Opaque`, 3 data keys
+
+Vault is not used by the application in Phase 3.
+
+### Security Review
+
+Confirmed:
+
+- Vault initialization material is outside Git
+- Vault root token is outside Git
+- No Vault admin credentials are present in Helm values
+- No Vault admin credentials are present in Argo CD resources
+- No unseal keys are present in Git history
+- No Vault root-token pattern was found in Git history
+- No application Secret migration was performed
+- No future-phase Vault features were configured
+
+During verification, one metadata-intended command accidentally printed base64-encoded values from the existing fake local Kubernetes application Secrets to tool output. The values are the same fake local-only values already present in the Phase 1 chart defaults, and no secret values were added to documentation or committed as new material. Subsequent Secret checks used only name, type, and data-count output.
+
+Deferred:
+
+- Kubernetes Auth
+- Vault policies
+- KV secrets
+- Terraform
+- PKI
+- database secrets
+- Vault Agent
+- Vault Secrets Operator
+- CSI
+- backups
+- DR restore
+- failover
+
 Future Vault migration model:
 
 ```text
