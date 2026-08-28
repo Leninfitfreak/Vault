@@ -86,6 +86,29 @@ Runtime acceptance verified:
 
 Vault does not manage application secrets yet. The application still uses Kubernetes Secrets and reports `secret_source: kubernetes-secret`. Kubernetes Auth, policies, KV, PKI, database secrets, Vault Agent, VSO, CSI, backups, DR restore, and failover are intentionally deferred.
 
+## Local Vault Unseal Helper
+
+Local Minikube keeps the existing Shamir seal model with 5 key shares and a threshold of 3. The local helper at `scripts/local/vault-unseal.ps1` can unseal sealed Vault pods by reading the three required shares from the current PowerShell session or by prompting securely:
+
+```powershell
+$env:VAULT_UNSEAL_KEY_1 = "<share-1>"
+$env:VAULT_UNSEAL_KEY_2 = "<share-2>"
+$env:VAULT_UNSEAL_KEY_3 = "<share-3>"
+.\scripts\local\vault-unseal.ps1
+```
+
+Clear the session variables after use:
+
+```powershell
+Remove-Item Env:VAULT_UNSEAL_KEY_1 -ErrorAction SilentlyContinue
+Remove-Item Env:VAULT_UNSEAL_KEY_2 -ErrorAction SilentlyContinue
+Remove-Item Env:VAULT_UNSEAL_KEY_3 -ErrorAction SilentlyContinue
+```
+
+The helper does not store keys, print keys, initialize Vault, reset Vault, delete PVCs, or change seal/Raft configuration. Shamir keys are separate from the Vault administrative token used by Terraform through `VAULT_ADDR` and `VAULT_TOKEN`.
+
+Production and cloud environments should use Vault HA with integrated Raft, TLS, cloud/workload identity, and cloud KMS or HSM auto-unseal instead of this local helper. Cloud KMS auto-unseal is documented as the target model and is not implemented in Phase 7.
+
 ## Multi-Environment Vault Configuration
 
 Phase 4 separates reusable Vault platform logic from environment-specific configuration:

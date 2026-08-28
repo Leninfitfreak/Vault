@@ -1376,6 +1376,121 @@ Planned future mapping:
 
 Phase 2 must not start until explicitly approved.
 
+## Phase 7 Vault KV And VSO Checkpoint
+
+Phase 7 will migrate only the `orders-service` `API_KEY` from a manually managed Kubernetes Secret to Vault KV v2 delivered back to Kubernetes through the official HashiCorp Vault Secrets Operator.
+
+The migration is intentionally narrow:
+
+- selected workload: `orders-service`
+- selected key: `API_KEY`
+- keys not migrated: `DB_USERNAME`, `DB_PASSWORD`
+- reason: database credentials are shared with PostgreSQL and are reserved for the later dynamic database credentials phase
+
+Secret values were not printed during the checkpoint inspection.
+
+### Current Secret Model
+
+`orders-service` consumes `orders-service-credentials` through environment variables:
+
+- `API_KEY`
+- `DB_USERNAME`
+- `DB_PASSWORD`
+
+`postgresql` also consumes `DB_USERNAME` and `DB_PASSWORD` from `orders-service-credentials`.
+
+The Phase 7 cutover must avoid two controllers owning the same Kubernetes Secret. The expected safe pattern is:
+
+```text
+Vault KV v2
+    |
+    v
+Vault Secrets Operator
+    |
+    v
+new VSO-managed Kubernetes Secret
+    |
+    v
+orders-service API_KEY reference
+```
+
+The legacy `orders-service-credentials` Secret remains responsible for database credentials until the database secrets phase.
+
+### Local Unseal Model
+
+Local Minikube keeps the existing Vault seal model:
+
+- seal: Shamir
+- shares: 5
+- threshold: 3
+- initialization: existing initialization retained
+- Raft data: existing PVC-backed Raft data retained
+
+The helper at `scripts/local/vault-unseal.ps1` is a local-development-only convenience wrapper. It discovers Vault pods, skips already-unsealed pods, prompts for or reads three externally supplied Shamir shares, and submits shares without printing them.
+
+The helper does not:
+
+- hard-code Shamir shares
+- persist Shamir shares
+- print key values or prefixes
+- initialize Vault
+- reinitialize Vault
+- delete PVCs
+- change seal configuration
+- change Raft membership
+
+Example local usage with placeholders:
+
+```powershell
+$env:VAULT_UNSEAL_KEY_1 = "<share-1>"
+$env:VAULT_UNSEAL_KEY_2 = "<share-2>"
+$env:VAULT_UNSEAL_KEY_3 = "<share-3>"
+.\scripts\local\vault-unseal.ps1
+```
+
+Clear the current session after use:
+
+```powershell
+Remove-Item Env:VAULT_UNSEAL_KEY_1 -ErrorAction SilentlyContinue
+Remove-Item Env:VAULT_UNSEAL_KEY_2 -ErrorAction SilentlyContinue
+Remove-Item Env:VAULT_UNSEAL_KEY_3 -ErrorAction SilentlyContinue
+```
+
+Shamir shares and the Vault administrative token are different materials. Terraform continues to require externally supplied `VAULT_ADDR` and `VAULT_TOKEN`; neither belongs in Git, Terraform variables, Helm values, Kubernetes manifests, documentation, or helper scripts.
+
+### Production Seal Model
+
+The local Shamir helper is not the production model.
+
+Cloud development, QA, production, and recovery environments should use:
+
+- Vault HA with integrated Raft
+- TLS for client and cluster traffic
+- cloud KMS or HSM auto-unseal
+- cloud/workload identity for approved administration paths
+- strict Kubernetes and Vault RBAC
+- audit logging
+- encrypted Terraform backend with locking
+
+Examples:
+
+- AWS: AWS KMS with workload or IAM identity
+- Azure: Azure Key Vault or Managed HSM with Managed Identity
+- GCP: Cloud KMS with Workload Identity
+
+Cloud KMS auto-unseal is not implemented in Phase 7.
+
+### Current Blocker
+
+Phase 7 infrastructure work is blocked until an administrative Vault authentication mechanism is available to Terraform through the current execution environment.
+
+Required environment:
+
+- `VAULT_ADDR`
+- `VAULT_TOKEN`
+
+The token must be supplied externally and must not be pasted into chat or committed to the repository.
+
 ## Production Agent Access Control - Deferred
 
 MCP, agent isolation, production Kubernetes access control, AWS agent access, and production credential management are intentionally not part of the current local Phase 1 lab.
