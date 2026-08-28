@@ -1024,6 +1024,339 @@ The space-separated `-out phase5.tfplan` form was used for saved plans.
 Lesson:
 Terraform is now cleanly separated from Kubernetes runtime reconciliation. Argo CD owns Vault runtime state; Terraform owns only explicitly approved Vault logical objects.
 
+## Phase 6 Vault Kubernetes Auth And Workload Identity
+
+Phase 6 enables Vault Kubernetes Auth and establishes reusable workload identity authorization. It proves that Kubernetes workloads can authenticate to Vault with ServiceAccount identity and receive short-lived, least-privilege Vault tokens.
+
+No application secret values were migrated. The application still consumes existing Kubernetes Secrets.
+
+### Authentication Flow
+
+```text
+Kubernetes Pod
+      |
+      | ServiceAccount JWT
+      v
+Vault Kubernetes Auth
+      |
+      v
+Vault Role
+      |
+      v
+Vault Policy
+      |
+      v
+short-lived Vault token
+```
+
+Authentication and authorization are separated:
+
+- Kubernetes Auth proves workload identity.
+- Vault role maps that identity to policies and token settings.
+- Vault policy controls allowed access.
+
+### Ownership Boundary
+
+Argo CD and Helm continue to own Kubernetes runtime resources:
+
+- Vault StatefulSet
+- Vault Services
+- Vault PVCs
+- Vault ServiceAccount
+- TokenReview RBAC
+- application Kubernetes workloads
+
+Terraform owns Vault logical configuration:
+
+- Kubernetes auth backend
+- Kubernetes auth backend configuration
+- Kubernetes auth roles
+- Vault policies
+
+Terraform does not manage Kubernetes resources.
+
+### Kubernetes ServiceAccounts
+
+Actual workload identities inspected before implementation:
+
+- `frontend-service` Deployment -> ServiceAccount `frontend-service`
+- `orders-service` Deployment -> ServiceAccount `orders-service`
+- `consumer-service` Deployment -> ServiceAccount `consumer-service`
+- `postgresql` StatefulSet -> ServiceAccount `postgresql`
+
+`orders-service` was selected as the Phase 6 proof workload because it is the future consumer of API and database credentials.
+
+### TokenReview RBAC
+
+The official Vault Helm chart already created the required minimal TokenReview binding:
+
+- ServiceAccount: `vault` in namespace `vault`
+- ClusterRoleBinding: `vault-server-binding`
+- ClusterRole: `system:auth-delegator`
+- Purpose: allow Vault Kubernetes Auth to validate ServiceAccount JWTs through the Kubernetes TokenReview API
+
+No `cluster-admin`, `admin`, or `edit` role was granted.
+
+### Terraform Resources
+
+Phase 6 added a generic reusable module:
+
+```text
+platform/vault/terraform/modules/kubernetes-auth/
+  main.tf
+  outputs.tf
+  variables.tf
+```
+
+Terraform-managed logical resources:
+
+- `vault_auth_backend.kubernetes`
+- `vault_kubernetes_auth_backend_config.this`
+- `vault_kubernetes_auth_backend_role.workloads["orders-service"]`
+- `vault_policy.this["orders-service-runtime"]`
+
+The shared module contains no `orders-service` hardcoding. The workload-specific binding lives in `environments/primary/terraform.tfvars`.
+
+### Kubernetes Auth Configuration
+
+Configured values:
+
+- Path: `auth/kubernetes`
+- Kubernetes API: `https://kubernetes.default.svc:443`
+- Reviewer model: Vault in-pod ServiceAccount token and local CA
+- Long-lived reviewer JWT in Git: no
+- `disable_local_ca_jwt`: false
+- `token_reviewer_jwt_set`: false
+
+This follows the supported in-cluster Vault model where Vault can use its own local ServiceAccount token and CA when running as a Kubernetes pod.
+
+### Workload Role
+
+Role: `orders-service`
+
+- Bound ServiceAccount: `orders-service`
+- Bound namespace: `orders`
+- Audience: `vault`
+- Token policy: `orders-service-runtime`
+- Token TTL: 900 seconds
+- Token max TTL: 1800 seconds
+- Token type: default
+
+The issued workload token includes Vault's unavoidable `default` policy and the explicit `orders-service-runtime` policy. It does not include `root`.
+
+### Least-Privilege Policy
+
+Policy: `orders-service-runtime`
+
+Purpose:
+
+- prove workload authorization without introducing application secret storage
+- allow one harmless read operation against Vault health
+
+Allowed path:
+
+```hcl
+path "sys/health" {
+  capabilities = ["read"]
+}
+```
+
+No `sys/*`, `auth/*`, `sudo`, root-like, KV, database, PKI, or application-secret permissions were granted.
+
+### Validation Results
+
+Terraform:
+
+- Terraform version: `v1.14.8`
+- Vault provider: `hashicorp/vault v5.11.0`
+- `terraform fmt -check`: pass
+- `terraform validate`: pass
+- Initial Phase 6 plan: 4 resources to add, 0 change, 0 destroy
+- Apply: pass
+- Second plan: no changes
+- Final idempotency: pass
+
+Authentication tests:
+
+- Correct ServiceAccount `orders/orders-service`: pass
+- Wrong ServiceAccount `orders/frontend-service`: denied
+- Wrong namespace `default/default`: denied
+
+Authorization tests:
+
+- Allowed operation `sys/health`: pass
+- Unauthorized policy list: denied
+- Administrative token creation: denied
+- Root policy attached: no
+
+Token metadata:
+
+- Policies: `default`, `orders-service-runtime`
+- TTL: 900 seconds
+- TTL within expected range: yes
+- Renewable: yes
+- JWT printed: no
+- Vault workload token printed: no
+
+Token lifecycle:
+
+```text
+ServiceAccount JWT
+      |
+      v
+Vault login
+      |
+      v
+short-lived Vault token
+      |
+      v
+expires or is revoked
+      |
+      v
+workload authenticates again
+```
+
+Future Agent, VSO, or CSI integration can handle token renewal and reauthentication. Phase 6 did not introduce any of those components.
+
+### Terraform Drift Test
+
+Drift target:
+
+- `orders-service-runtime` policy
+
+Manual drift:
+
+- temporarily added a non-secret extra capability to `sys/health`
+
+Result:
+
+- Terraform plan detected drift with detailed exit code `2`
+- Terraform restored the declared policy
+- Final plan returned no changes with exit code `0`
+
+### State Security
+
+Targeted primary state inspection found no:
+
+- root-token pattern
+- unseal-key pattern
+- encoded-token pattern
+- application password marker
+- application API token marker
+- private-key marker
+
+A JWT-shaped pattern was found only in Terraform's opaque provider `private` metadata field, not in a named JWT/token attribute. No ServiceAccount JWT or Vault workload token was intentionally stored in Terraform state.
+
+State files and plan files remain ignored by Git.
+
+### Runtime Regression
+
+Vault primary:
+
+- Argo CD sync: `Synced`
+- Argo CD health: `Healthy`
+- Replicas: 3
+- Pods: running
+- Unsealed: yes
+- HA: enabled
+- Raft peers: 3
+- Leader: `vault-0`
+- Followers: `vault-1`, `vault-2`
+- Reinitialized: no
+
+Vault recovery:
+
+- Argo CD sync: `Synced`
+- Argo CD health: `Healthy`
+- State: staged/inactive
+- Terraform applied live: no
+- Primary data restored: no
+
+Application regression:
+
+- `frontend-service` -> `orders-service`: HTTP 200
+- `consumer-service` -> `orders-service`: HTTP 200
+- `orders-service` -> PostgreSQL: HTTP 200 and TCP connectivity succeeded
+- Traefik ingress with `orders.primary.local`: HTTP 200
+- Existing Kubernetes Secrets preserved by metadata
+- Application consuming Vault secrets: no
+
+### Reuse Model
+
+A future project can add workload identity through data:
+
+```hcl
+workload_identities = {
+  payment-service = {
+    bound_service_account_names      = ["payment-service"]
+    bound_service_account_namespaces = ["payments"]
+    token_policies                   = ["payment-service-runtime"]
+    token_ttl                        = 900
+    token_max_ttl                    = 1800
+    audience                         = "vault"
+  }
+}
+```
+
+No shared module changes should be required for another project with the same pattern.
+
+### Cloud Portability
+
+The Kubernetes Auth concept remains portable across EKS, AKS, GKE, OpenShift, and conformant Kubernetes distributions. Environment-specific configuration may need:
+
+- Kubernetes API endpoint changes
+- CA trust configuration
+- network reachability from Vault to the Kubernetes API
+- TokenReview RBAC review
+- ServiceAccount token audience/issuer behavior validation
+- cloud identity integration in a later phase
+
+No cloud-specific integration was implemented in Phase 6.
+
+### Security And Scope
+
+Confirmed:
+
+- root token in Git: no
+- unseal keys in Git: no
+- JWT in Git: no
+- Vault workload token in Git: no
+- Terraform state in Git: no
+- application secrets in Terraform: no
+- private keys in Git: no
+- sensitive values exposed in Phase 6: no
+
+Not implemented:
+
+- KV application secret migration
+- Vault Agent
+- Vault Secrets Operator
+- CSI
+- dynamic database credentials
+- database secrets engine
+- PKI
+- mTLS
+- CI/CD
+- snapshots
+- restore
+- failover
+- MCP
+- custom operator or CRD
+
+### Problems And Lessons
+
+Problem:
+The Vault Terraform provider expects `token_ttl` and `token_max_ttl` on `vault_kubernetes_auth_backend_role` as numeric seconds, not duration strings.
+
+Root cause:
+The initial role input used human-readable strings such as `15m` and `30m`.
+
+Resolution:
+The module input schema and primary values were updated to use `900` and `1800`.
+
+Lesson:
+Auth resources should be planned before apply and checked against provider schema. The failed plan caught the type mismatch before any live Vault change was made.
+
 Future Vault migration model:
 
 ```text

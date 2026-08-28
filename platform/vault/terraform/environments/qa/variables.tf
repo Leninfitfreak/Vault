@@ -10,3 +10,28 @@ variable "policies" {
   }))
   default = {}
 }
+
+variable "kubernetes_auth" {
+  description = "Kubernetes auth configuration for this environment."
+  type = object({
+    enabled              = bool
+    backend_path         = string
+    kubernetes_host      = string
+    disable_local_ca_jwt = bool
+    workload_identities = map(object({
+      bound_service_account_names      = list(string)
+      bound_service_account_namespaces = list(string)
+      token_policies                   = list(string)
+      token_ttl                        = number
+      token_max_ttl                    = number
+      audience                         = optional(string)
+    }))
+  })
+  default = {
+    enabled              = false
+    backend_path         = "kubernetes"
+    kubernetes_host      = "https://kubernetes.default.svc:443"
+    disable_local_ca_jwt = false
+    workload_identities  = {}
+  }
+}

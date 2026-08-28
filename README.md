@@ -133,6 +133,34 @@ Terraform configuration lives under `platform/vault/terraform`. The first live p
 
 Terraform local bootstrap authentication uses externally supplied `VAULT_ADDR` and `VAULT_TOKEN` values. Tokens, unseal keys, Terraform state, plan files, and local environment files are excluded from Git. The provider lock file is committed for deterministic provider selection.
 
+## Vault Kubernetes Auth
+
+Phase 6 enables Vault Kubernetes Auth through Terraform so workloads can authenticate with Kubernetes ServiceAccount identity instead of static Vault tokens.
+
+```text
+                       Git
+                        |
+          +-------------+-------------+
+          |                           |
+          v                           v
+       Argo CD                     Terraform
+          |                           |
+          v                           v
+    Kubernetes                   Vault Config
+          |                           |
+          |                    Kubernetes Auth
+          |                           |
+          v                           v
+     Application --------------->   Vault
+          |      SA identity         |
+          |                          |
+          +---- existing K8s --------+
+                Secrets still used
+                during Phase 6
+```
+
+The initial workload role is `orders-service`, bound only to ServiceAccount `orders-service` in namespace `orders`. It receives a short-lived Vault token with only the `orders-service-runtime` policy. That policy permits only read access to `sys/health` for authorization proof; no application secrets were migrated to Vault.
+
 ## Included In Phase 1
 
 - Helm chart for `frontend-service`, `orders-service`, `consumer-service`, and `postgresql`
