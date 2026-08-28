@@ -1,0 +1,21 @@
+environments:
+  - name: dev
+    role: development
+    vaultValues: values/dev.yaml
+    destination: dev
+    deployByDefault: false
+  - name: qa
+    role: qa
+    vaultValues: values/qa.yaml
+    destination: qa
+    deployByDefault: false
+  - name: primary
+    role: primary
+    vaultValues: values/primary.yaml
+    destination: primary
+    deployByDefault: true
+  - name: recovery
+    role: recovery
+    vaultValues: values/recovery.yaml
+    destination: recovery
+    deployByDefault: true

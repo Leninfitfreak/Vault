@@ -86,6 +86,26 @@ Runtime acceptance verified:
 
 Vault does not manage application secrets yet. The application still uses Kubernetes Secrets and reports `secret_source: kubernetes-secret`. Kubernetes Auth, policies, KV, PKI, database secrets, Vault Agent, VSO, CSI, backups, DR restore, and failover are intentionally deferred.
 
+## Multi-Environment Vault Configuration
+
+Phase 4 separates reusable Vault platform logic from environment-specific configuration:
+
+```text
+Vault platform definition
+          |
+  +-------+-------+----------------+
+  |               |                |
+ dev              qa           production
+                              |
+                         +----+----+
+                         |         |
+                      primary   recovery
+```
+
+The shared Vault defaults stay in `platform/vault/values.yaml`. Environment overrides live in `platform/vault/values/dev.yaml`, `values/qa.yaml`, `values/primary.yaml`, and `values/recovery.yaml`. The non-secret environment catalog at `platform/vault/environments.yaml` records names, roles, value files, and intended destinations for future automation.
+
+The same chart remains independent of `orders-service`; application onboarding is deferred. Current local values keep Vault server TLS disabled only for Minikube validation, while the documented production model requires TLS and auto-unseal through an external KMS or HSM.
+
 ## Included In Phase 1
 
 - Helm chart for `frontend-service`, `orders-service`, `consumer-service`, and `postgresql`

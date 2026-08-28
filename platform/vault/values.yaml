@@ -101,3 +101,25 @@ vault:
   ui:
     enabled: true
     serviceType: ClusterIP
+
+platform:
+  component: vault
+  phase: "4"
+  environment: shared
+  clusterRole: shared
+  exposure:
+    public: false
+    ingress:
+      enabled: false
+  tls:
+    enabled: false
+    secretName: ""
+    caSecretName: ""
+    serverName: ""
+  storage:
+    storageClass: ""
+    accessMode: ReadWriteOnce
+  notes:
+    localTlsDisabled: true
+    productionTlsRequired: true
+    productionAutoUnsealRequired: true

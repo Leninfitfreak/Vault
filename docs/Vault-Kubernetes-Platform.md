@@ -499,6 +499,240 @@ Deferred:
 - DR restore
 - failover
 
+## Phase 4 Reusable Multi-Environment Vault Configuration
+
+Phase 4 makes the Vault platform reusable across environments and projects before any application onboarding begins. The goal is to keep Vault runtime logic common while environment-specific differences are expressed through values.
+
+No Vault business capabilities were added in Phase 4. Kubernetes Auth, policies, KV secrets, application migration, Vault Agent, VSO, CSI, database secrets, PKI, Terraform, CI/CD, snapshots, restore, failover, failback, and MCP remain deferred.
+
+### Repository Structure
+
+Final Vault configuration structure:
+
+```text
+platform/
+  vault/
+    Chart.yaml
+    Chart.lock
+    environments.yaml
+    values.yaml
+    values/
+      dev.yaml
+      qa.yaml
+      primary.yaml
+      recovery.yaml
+```
+
+`values.yaml` contains common Vault defaults:
+
+- official Vault image pin
+- HA mode
+- integrated Raft enablement
+- shared health probes
+- shared service behavior
+- shared service account behavior
+- shared PDB behavior
+- shared local storage defaults
+- shared local TLS-disabled behavior
+- reusable non-secret platform metadata model
+
+Environment files override only what differs:
+
+- `dev.yaml`: development role, 1 Vault replica, smaller resources, local ClusterIP exposure
+- `qa.yaml`: QA role, 3 Vault replicas, moderate resources, local ClusterIP exposure
+- `primary.yaml`: production primary role, 3 Vault replicas, active primary runtime
+- `recovery.yaml`: production recovery role, staged/inactive runtime definition
+
+`environments.yaml` is a concise non-secret catalog for future automation:
+
+- environment name
+- role
+- Vault values file
+- intended destination
+- deploy-by-default flag
+
+It contains no credentials, kubeconfig data, Vault tokens, unseal keys, application secrets, or Argo credentials.
+
+### Environment Model
+
+The role model is generic:
+
+- `development`: lower local resource footprint for development rendering or future dev clusters
+- `qa`: production-like topology where practical
+- `primary`: active production-style primary runtime
+- `recovery`: recovery runtime definition without data restoration or failover logic
+
+Recovery orchestration is intentionally not encoded in Helm values. The chart describes runtime shape; future restore and failover workflows belong to later phases.
+
+### GitOps Mapping
+
+Current explicit Applications remain the clearest model for two live environments:
+
+```text
+vault-primary
+  -> platform/vault
+  -> values/primary.yaml
+  -> primary cluster
+
+vault-recovery
+  -> platform/vault
+  -> values/recovery.yaml
+  -> recovery cluster
+```
+
+Future environments can add explicit Applications such as `vault-dev` and `vault-qa` using the same chart path and their environment values files. ApplicationSet is deferred until the environment count justifies the extra abstraction.
+
+Desired-state flow remains:
+
+```text
+Git environment values
+       |
+       v
+Argo CD
+       |
+       v
+Official HashiCorp Vault Helm chart
+       |
+       v
+Kubernetes
+```
+
+Direct `helm install` or `helm upgrade` is not the normal operating path.
+
+Phase 4 did not repeat the destructive-adjacent Vault drift test because the Argo CD Application ownership model, sync policy, and rendered primary Kubernetes resources were not changed by the reusable values refactor. The Phase 3 metadata-only self-heal test remains the current live acceptance evidence, and Phase 4 reverified `vault-primary` as `Synced` and `Healthy` after the pushed commit.
+
+### TLS Model
+
+Current local state:
+
+- Vault server transport TLS remains disabled for the Minikube-only runtime.
+- No certificates or private keys are committed.
+- No Vault PKI engine is configured.
+
+Reusable values model:
+
+- `platform.tls.enabled`
+- `platform.tls.secretName`
+- `platform.tls.caSecretName`
+- `platform.tls.serverName`
+
+Production model:
+
+- TLS must be enabled for Vault API and cluster traffic.
+- Certificates must come from an approved certificate source.
+- Private keys must remain outside Git.
+- Auto-unseal should be backed by a cloud KMS or HSM.
+
+### Storage Model
+
+Common storage behavior:
+
+- integrated Raft data stored at `/vault/data`
+- configurable PVC size
+- configurable storage class
+- configurable access mode
+
+Current local state:
+
+- `storageClass: null` uses the cluster default storage class in Minikube.
+- Primary uses three 1Gi PVCs.
+
+Cloud portability:
+
+- AKS, EKS, GKE, and OpenShift deployments should override storage class and sizing through environment values.
+- Cloud production storage should use the platform-approved encrypted block storage class and appropriate backup/snapshot controls in a later phase.
+
+### Resource Model
+
+Common baseline:
+
+- requests: `100m` CPU and `256Mi` memory
+- limits: `500m` CPU and `512Mi` memory
+
+Environment overrides:
+
+- dev: smaller local footprint, 1 replica, `50m/128Mi` requests and `250m/256Mi` limits
+- QA: 3 replicas, moderate local footprint, common baseline resources
+- primary: 3 replicas, production-style topology using the common local baseline for this lab
+- recovery: staged/inactive definition, no live Vault server pods
+
+Local values are not production sizing recommendations. Production sizing must be based on workload, storage latency, audit logging, request rate, and platform SLOs.
+
+### Service Exposure Model
+
+Common exposure is internal-first:
+
+- Vault services are `ClusterIP`
+- UI service is internal `ClusterIP`
+- public exposure defaults to false
+- ingress defaults to disabled
+
+No public Vault ingress was created in Phase 4.
+
+### Project Reuse
+
+The Vault runtime layer has no dependency on `orders-service`. It is defined under `platform/vault`, has its own `platform` AppProject, and can be reused by another application or project by changing environment values and GitOps destination mapping.
+
+Application onboarding remains a future phase.
+
+### Validation
+
+Pre-phase state:
+
+- Git branch: `main`
+- Previous commit: `9082c18 Document Phase 3 Vault runtime acceptance`
+- Argo CD Applications: `orders-service-primary`, `orders-service-recovery`, `vault-primary`, and `vault-recovery` were `Synced` and `Healthy`
+- Vault primary: 3 pods running, initialized, unsealed, HA enabled, integrated Raft
+- Raft peers: 3 voters, 1 leader, 2 followers
+
+Helm validation:
+
+- `helm lint platform/vault`: pass
+- dev render: pass, 1 Vault replica, Raft enabled
+- QA render: pass, 3 Vault replicas, Raft enabled
+- primary render: pass, 3 Vault replicas, Raft enabled
+- recovery render: pass, intentionally empty/inactive
+
+Security validation:
+
+- no root-token pattern in Vault values
+- no unseal-key pattern in Vault values
+- no encoded-token pattern in Vault values
+- no application secret values in Vault values
+- no private-key marker in Vault values
+- no root-token, unseal-key, or encoded-token pattern found in Git history
+
+### Portability Review
+
+To deploy the same Vault platform to AKS, EKS, GKE, OpenShift, or another conformant Kubernetes platform, environment values should supply:
+
+- storage class and capacity
+- resource requests and limits
+- node topology and scheduling constraints
+- TLS certificate Secret names and server names
+- auto-unseal provider configuration in a later phase
+- internal load balancer or ingress policy if required
+- cloud identity and workload identity integration in a later phase
+
+Minikube-specific assumptions are isolated to local values and documentation:
+
+- default storage class via `storageClass: null`
+- small resource sizes
+- TLS disabled for the local-only runtime
+- no cloud KMS auto-unseal
+- no public load balancer
+
+### Problems And Lessons
+
+Problem:
+Helm was installed locally through Winget but was not available on PATH in the shell session.
+
+Resolution:
+The installed Helm binary was invoked directly from the Winget package path for render validation.
+
+Lesson:
+The reusable values model should be validated with rendering before GitOps reconciliation, especially around StatefulSet-backed systems like Vault where accidental pod-template or PVC changes can trigger operational work.
+
 Future Vault migration model:
 
 ```text

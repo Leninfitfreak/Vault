@@ -1,0 +1,30 @@
+platform:
+  environment: qa
+  clusterRole: qa
+
+vault:
+  global:
+    namespace: vault
+    tlsDisable: true
+
+  server:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    dataStorage:
+      size: 1Gi
+      storageClass: null
+      accessMode: ReadWriteOnce
+    ha:
+      enabled: true
+      replicas: 3
+      raft:
+        enabled: true
+
+  ui:
+    enabled: true
+    serviceType: ClusterIP

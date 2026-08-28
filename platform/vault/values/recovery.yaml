@@ -13,3 +13,16 @@ vault:
 
   ui:
     enabled: false
+
+platform:
+  environment: production
+  clusterRole: recovery
+  exposure:
+    public: false
+    ingress:
+      enabled: false
+  tls:
+    enabled: false
+    secretName: ""
+    caSecretName: ""
+    serverName: ""

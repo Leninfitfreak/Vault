@@ -1,0 +1,30 @@
+platform:
+  environment: dev
+  clusterRole: development
+
+vault:
+  global:
+    namespace: vault
+    tlsDisable: true
+
+  server:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
+    dataStorage:
+      size: 1Gi
+      storageClass: null
+      accessMode: ReadWriteOnce
+    ha:
+      enabled: true
+      replicas: 1
+      raft:
+        enabled: true
+
+  ui:
+    enabled: true
+    serviceType: ClusterIP

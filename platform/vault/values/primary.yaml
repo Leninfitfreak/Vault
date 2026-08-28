@@ -8,3 +8,16 @@ vault:
       replicas: 3
       raft:
         enabled: true
+
+platform:
+  environment: production
+  clusterRole: primary
+  exposure:
+    public: false
+    ingress:
+      enabled: false
+  tls:
+    enabled: false
+    secretName: ""
+    caSecretName: ""
+    serverName: ""
