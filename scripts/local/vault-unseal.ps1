@@ -8,10 +8,14 @@
 param(
     [string]$Context = "vault-primary",
     [string]$Namespace = "vault",
-    [string]$Selector = "app.kubernetes.io/name=vault,component=server"
+    [string]$Selector = "app.kubernetes.io/name=vault,component=server",
+    [string]$CredentialFile = $env:VAULT_LOCAL_CREDENTIAL_FILE
 )
 
 $ErrorActionPreference = "Stop"
+if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+    $PSNativeCommandUseErrorActionPreference = $false
+}
 
 function Assert-CommandExists {
     param([Parameter(Mandatory = $true)][string]$Name)
@@ -35,11 +39,48 @@ function Convert-SecureStringToPlainText {
     }
 }
 
+function Get-ShareFromCredentialFile {
+    param(
+        [Parameter(Mandatory = $true)][int]$Index,
+        [string]$Path
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $null
+    }
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        throw "Credential file was configured but does not exist."
+    }
+
+    $credentialData = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    $shares = @()
+
+    if ($credentialData.unseal_keys_b64) {
+        $shares = @($credentialData.unseal_keys_b64)
+    }
+    elseif ($credentialData.unseal_keys) {
+        $shares = @($credentialData.unseal_keys)
+    }
+
+    if ($shares.Count -lt $Index) {
+        throw "Credential file does not contain enough unseal shares."
+    }
+
+    return (ConvertTo-SecureString ([string]$shares[$Index - 1]) -AsPlainText -Force)
+}
+
 function Get-UnsealShare {
     param(
         [Parameter(Mandatory = $true)][int]$Index,
-        [Parameter(Mandatory = $true)][string]$EnvironmentVariable
+        [Parameter(Mandatory = $true)][string]$EnvironmentVariable,
+        [string]$CredentialFilePath
     )
+
+    $fileShare = Get-ShareFromCredentialFile -Index $Index -Path $CredentialFilePath
+    if ($fileShare) {
+        return $fileShare
+    }
 
     $envValue = [Environment]::GetEnvironmentVariable($EnvironmentVariable)
     if (-not [string]::IsNullOrWhiteSpace($envValue)) {
@@ -63,14 +104,45 @@ function Invoke-Kubectl {
 function Get-VaultStatus {
     param([Parameter(Mandatory = $true)][string]$PodName)
 
-    $json = Invoke-Kubectl -Arguments @(
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $json = & kubectl `
+            --context $Context `
+            -n $Namespace `
+            exec $PodName `
+            -- vault status -format=json 2>&1
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    $jsonText = $json | Out-String
+
+    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 2) {
+        throw $jsonText.Trim()
+    }
+
+    $jsonStart = $jsonText.IndexOf("{")
+    $jsonEnd = $jsonText.LastIndexOf("}")
+    if ($jsonStart -lt 0 -or $jsonEnd -lt $jsonStart) {
+        throw "Vault status did not return parseable JSON for $PodName."
+    }
+
+    return ($jsonText.Substring($jsonStart, $jsonEnd - $jsonStart + 1) | ConvertFrom-Json)
+}
+
+function Get-VaultStatusText {
+    param([Parameter(Mandatory = $true)][string]$PodName)
+
+    $status = Invoke-Kubectl -Arguments @(
         "--context", $Context,
         "-n", $Namespace,
         "exec", $PodName,
-        "--", "vault", "status", "-format=json"
+        "--", "vault", "status"
     )
 
-    return ($json | Out-String | ConvertFrom-Json)
+    return ($status | Out-String)
 }
 
 function Submit-UnsealShare {
@@ -81,7 +153,7 @@ function Submit-UnsealShare {
 
     $plainText = Convert-SecureStringToPlainText $Share
     try {
-        $plainText | & kubectl --context $Context -n $Namespace exec -i $PodName -- vault operator unseal -format=json 1>$null
+        & kubectl --context $Context -n $Namespace exec $PodName -- vault operator unseal -format=json $plainText 1>$null
         if ($LASTEXITCODE -ne 0) {
             throw "Unseal operation failed for $PodName."
         }
@@ -113,9 +185,9 @@ if (-not $podNames -or $podNames.Count -eq 0) {
 }
 
 $shares = @(
-    (Get-UnsealShare -Index 1 -EnvironmentVariable "VAULT_UNSEAL_KEY_1"),
-    (Get-UnsealShare -Index 2 -EnvironmentVariable "VAULT_UNSEAL_KEY_2"),
-    (Get-UnsealShare -Index 3 -EnvironmentVariable "VAULT_UNSEAL_KEY_3")
+    (Get-UnsealShare -Index 1 -EnvironmentVariable "VAULT_UNSEAL_KEY_1" -CredentialFilePath $CredentialFile),
+    (Get-UnsealShare -Index 2 -EnvironmentVariable "VAULT_UNSEAL_KEY_2" -CredentialFilePath $CredentialFile),
+    (Get-UnsealShare -Index 3 -EnvironmentVariable "VAULT_UNSEAL_KEY_3" -CredentialFilePath $CredentialFile)
 )
 
 if (($shares | Where-Object { $_ -ne $null }).Count -lt 3) {

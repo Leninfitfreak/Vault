@@ -107,6 +107,19 @@ Remove-Item Env:VAULT_UNSEAL_KEY_3 -ErrorAction SilentlyContinue
 
 The helper does not store keys, print keys, initialize Vault, reset Vault, delete PVCs, or change seal/Raft configuration. Shamir keys are separate from the Vault administrative token used by Terraform through `VAULT_ADDR` and `VAULT_TOKEN`.
 
+After a controlled local Vault reset, the protected bootstrap material for this laptop POC is stored outside the repository at:
+
+```text
+C:\Users\hp\.vault-poc\vault-primary-init.json
+```
+
+The helper can read the first three Shamir shares from that file without embedding them in the script:
+
+```powershell
+$env:VAULT_LOCAL_CREDENTIAL_FILE = "C:\Users\hp\.vault-poc\vault-primary-init.json"
+.\scripts\local\vault-unseal.ps1
+```
+
 Production and cloud environments should use Vault HA with integrated Raft, TLS, cloud/workload identity, and cloud KMS or HSM auto-unseal instead of this local helper. Cloud KMS auto-unseal is documented as the target model and is not implemented in Phase 7.
 
 ## Multi-Environment Vault Configuration

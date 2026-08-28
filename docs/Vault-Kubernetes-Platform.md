@@ -1439,6 +1439,19 @@ The helper does not:
 - change seal configuration
 - change Raft membership
 
+After the approved local Vault-only reset, bootstrap material for this laptop POC is stored outside the repository at:
+
+```text
+C:\Users\hp\.vault-poc\vault-primary-init.json
+```
+
+The helper can read the first three Shamir shares from that protected local file without embedding shares in the script:
+
+```powershell
+$env:VAULT_LOCAL_CREDENTIAL_FILE = "C:\Users\hp\.vault-poc\vault-primary-init.json"
+.\scripts\local\vault-unseal.ps1
+```
+
 Example local usage with placeholders:
 
 ```powershell
