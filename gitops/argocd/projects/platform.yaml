@@ -45,6 +45,8 @@ spec:
       kind: Deployment
     - group: policy
       kind: PodDisruptionBudget
+    - group: batch
+      kind: Job
     - group: rbac.authorization.k8s.io
       kind: Role
     - group: rbac.authorization.k8s.io
