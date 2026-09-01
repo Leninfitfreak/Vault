@@ -4,6 +4,12 @@ module "policies" {
   policies = var.policies
 }
 
+module "kv_v2" {
+  source = "../../modules/kv-v2"
+
+  mounts = var.kv_v2_mounts
+}
+
 module "kubernetes_auth" {
   count  = var.kubernetes_auth.enabled ? 1 : 0
   source = "../../modules/kubernetes-auth"

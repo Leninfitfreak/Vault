@@ -11,6 +11,14 @@ variable "policies" {
   default = {}
 }
 
+variable "kv_v2_mounts" {
+  description = "KV v2 mounts for static application secrets. Payload is managed outside Terraform."
+  type = map(object({
+    description = string
+  }))
+  default = {}
+}
+
 variable "kubernetes_auth" {
   description = "Kubernetes auth configuration for this environment."
   type = object({

@@ -3,6 +3,11 @@ output "policy_names" {
   value       = module.policies.policy_names
 }
 
+output "kv_v2_mount_paths" {
+  description = "Terraform-managed KV v2 mount paths."
+  value       = keys(var.kv_v2_mounts)
+}
+
 output "kubernetes_auth_path" {
   description = "Kubernetes auth path when enabled."
   value       = try(module.kubernetes_auth[0].backend_path, null)

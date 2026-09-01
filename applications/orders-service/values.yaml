@@ -7,8 +7,8 @@ global:
   managedBy: helm
   labels:
     app.kubernetes.io/part-of: orders-service
-    platform.hashicorp.com/phase: "1"
-    platform.hashicorp.com/secret-state: kubernetes-secrets
+    platform.hashicorp.com/phase: "7"
+    platform.hashicorp.com/secret-state: vault-secrets-operator
 
 images:
   application:
@@ -31,12 +31,22 @@ secrets:
   create: true
   ordersCredentials:
     name: orders-service-credentials
-    apiKey: fake-local-orders-api-key
     databaseUsername: orders_user
     databasePassword: fake-local-orders-password
   externalCredentials:
     name: external-service-credentials
     externalApiToken: fake-local-external-api-token
+  vaultBacked:
+    enabled: true
+    connectionName: vault-primary
+    authName: orders-service-vso
+    authServiceAccountName: orders-service-vso
+    authMount: kubernetes
+    authRole: orders-service-vso
+    mount: kv
+    path: primary/orders/orders-service/application
+    destinationName: orders-service-vault-credentials
+    refreshAfter: 30s
 
 frontend:
   name: frontend-service

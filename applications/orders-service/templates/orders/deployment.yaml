@@ -34,7 +34,7 @@ spec:
             - name: API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.secrets.ordersCredentials.name }}
+                  name: {{ .Values.secrets.vaultBacked.destinationName }}
                   key: API_KEY
             - name: DB_USERNAME
               valueFrom:

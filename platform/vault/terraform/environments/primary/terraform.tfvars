@@ -15,6 +15,19 @@ policies = {
       }
     EOT
   }
+  orders-service-api-key-read = {
+    rules = <<-EOT
+      path "kv/data/primary/orders/orders-service/application" {
+        capabilities = ["read"]
+      }
+    EOT
+  }
+}
+
+kv_v2_mounts = {
+  kv = {
+    description = "Reusable KV v2 engine for static application secrets"
+  }
 }
 
 kubernetes_auth = {
@@ -29,6 +42,14 @@ kubernetes_auth = {
       bound_service_account_namespaces = ["orders"]
       token_policies                   = ["orders-service-runtime"]
       token_ttl                        = 900
+      token_max_ttl                    = 1800
+      audience                         = "vault"
+    }
+    orders-service-vso = {
+      bound_service_account_names      = ["orders-service-vso"]
+      bound_service_account_namespaces = ["orders"]
+      token_policies                   = ["orders-service-api-key-read"]
+      token_ttl                        = 600
       token_max_ttl                    = 1800
       audience                         = "vault"
     }

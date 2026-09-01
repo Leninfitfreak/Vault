@@ -1,0 +1,6 @@
+vault-secrets-operator:
+  controller:
+    replicas: 1
+    extraLabels:
+      platform.hashicorp.com/environment: primary
+      platform.hashicorp.com/phase: "7"

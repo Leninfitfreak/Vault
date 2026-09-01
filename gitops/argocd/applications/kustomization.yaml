@@ -5,3 +5,4 @@ resources:
   - orders-service-recovery.yaml
   - vault-primary.yaml
   - vault-recovery.yaml
+  - vault-secrets-operator-primary.yaml
