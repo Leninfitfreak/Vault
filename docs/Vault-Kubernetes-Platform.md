@@ -1376,9 +1376,9 @@ Planned future mapping:
 
 Phase 2 must not start until explicitly approved.
 
-## Phase 7 Vault KV And VSO Checkpoint
+## Phase 7 Vault KV And VSO Acceptance
 
-Phase 7 will migrate only the `orders-service` `API_KEY` from a manually managed Kubernetes Secret to Vault KV v2 delivered back to Kubernetes through the official HashiCorp Vault Secrets Operator.
+Phase 7 migrated only the `orders-service` `API_KEY` from a manually managed Kubernetes Secret to Vault KV v2 delivered back to Kubernetes through the official HashiCorp Vault Secrets Operator.
 
 The migration is intentionally narrow:
 
@@ -1391,15 +1391,15 @@ Secret values were not printed during the checkpoint inspection.
 
 ### Current Secret Model
 
-`orders-service` consumes `orders-service-credentials` through environment variables:
+`orders-service` consumes credentials through environment variables:
 
-- `API_KEY`
-- `DB_USERNAME`
-- `DB_PASSWORD`
+- `API_KEY` from `orders-service-vault-credentials`, created by VSO from Vault KV v2
+- `DB_USERNAME` from `orders-service-credentials`
+- `DB_PASSWORD` from `orders-service-credentials`
 
 `postgresql` also consumes `DB_USERNAME` and `DB_PASSWORD` from `orders-service-credentials`.
 
-The Phase 7 cutover must avoid two controllers owning the same Kubernetes Secret. The expected safe pattern is:
+The Phase 7 cutover avoids two controllers owning the same Kubernetes Secret. The active pattern is:
 
 ```text
 Vault KV v2
@@ -1415,6 +1415,131 @@ orders-service API_KEY reference
 ```
 
 The legacy `orders-service-credentials` Secret remains responsible for database credentials until the database secrets phase.
+
+### Runtime Result
+
+Accepted Git revision:
+
+```text
+c779346fdf7ceee94ebf37e2846ea342a0c5ae4e
+```
+
+Argo CD health:
+
+- `orders-service-primary`: `Synced` and `Healthy`
+- `orders-service-recovery`: `Synced` and `Healthy`, inactive as designed
+- `vault-primary`: `Synced` and `Healthy`
+- `vault-recovery`: `Synced` and `Healthy`
+- `vault-secrets-operator-primary`: `Synced` and `Healthy`
+
+VSO resources:
+
+- `VaultConnection/orders/vault-primary`: `Healthy` and `Ready`
+- `VaultAuth/orders/orders-service-vso`: `Healthy` and `Ready`
+- `VaultStaticSecret/orders/orders-service-api-key`: `SecretSynced`, `Healthy`, and `Ready`
+- Destination Secret: `orders-service-vault-credentials`
+- Destination key: `API_KEY` present
+
+Secret ownership:
+
+- `orders-service-vault-credentials`: VSO-managed runtime Secret for `API_KEY`
+- `orders-service-credentials`: Helm/GitOps-managed Secret for `DB_USERNAME` and `DB_PASSWORD`
+- `API_KEY` is no longer present in `orders-service-credentials`
+- Secret values were not added to Git, Terraform variables, Terraform state, documentation, or helper scripts
+
+### Authorization Acceptance
+
+Vault Kubernetes Auth role:
+
+- role: `orders-service-vso`
+- bound ServiceAccount: `orders-service-vso`
+- bound namespace: `orders`
+- policy: `orders-service-api-key-read`
+- allowed path: `kv/data/primary/orders/orders-service/application`
+
+Verification result:
+
+- correct identity login: pass
+- exact-path read: pass
+- wrong ServiceAccount: denied
+- wrong namespace: denied
+- unrelated path read: denied
+- write to application path: denied
+- delete application path: denied
+- admin token creation: denied
+- root policy attached to workload token: no
+
+### Rotation, Drift, And Rollback Acceptance
+
+Rotation:
+
+- A controlled non-production `API_KEY` rotation was written to Vault KV v2.
+- VSO updated the destination Kubernetes Secret.
+- The destination Secret resource version and non-sensitive data hash changed.
+- `orders-service` rolled out and remained healthy.
+
+Restart tests:
+
+- `orders-service` restart: pass
+- VSO controller restart: pass
+
+Argo CD self-heal:
+
+- Drift introduced: `frontend-service` replica count changed from 1 to 2
+- Final result: Argo CD restored the Git-desired replica count of 1 and the app returned to `Synced` and `Healthy`
+- A metadata label drift on `VaultStaticSecret` was not observed as an Argo diff under the current server-side apply behavior, so the replica-count drift is the accepted self-heal proof
+
+Terraform drift:
+
+- Drift introduced: `orders-service-vso` role `token_ttl` changed to a non-secret test value
+- Terraform plan detected exactly one in-place change and no add/destroy actions
+- Terraform apply restored the Git-managed value
+- Final Terraform plan: no changes
+
+Rollback:
+
+- Self-heal was temporarily disabled on `orders-service-primary` to prevent Argo from immediately reverting the drill
+- `orders-service` was temporarily pointed back to `orders-service-credentials/API_KEY`
+- The temporary rollback rollout completed successfully
+- Final state was restored to `orders-service-vault-credentials/API_KEY`
+- The temporary `API_KEY` key was removed from the legacy Kubernetes Secret
+
+### Application And Vault Regression
+
+Application regression:
+
+- `frontend-service` -> `orders-service`: HTTP 200
+- `consumer-service` -> `orders-service`: HTTP 200
+- `orders-service` -> PostgreSQL: HTTP 200 and TCP connectivity succeeded
+- Traefik ingress with host `orders.primary.local`: HTTP 200
+
+Vault HA/Raft regression:
+
+- replicas: 3
+- initialized: yes
+- unsealed: 3 of 3
+- HA enabled: yes
+- Raft peers: 3
+- Raft voters: 3
+- leader: 1
+- followers: 2
+
+### Phase 7 Scope Boundary
+
+Phase 7 did not implement:
+
+- dynamic database credentials
+- database secrets engine
+- PKI
+- mTLS
+- Vault Agent
+- CSI
+- cloud KMS
+- backup or restore automation
+- DR/failover automation
+- CI/CD secret provisioning
+- MCP
+- Phase 8
 
 ### Local Unseal Model
 
@@ -1493,16 +1618,9 @@ Examples:
 
 Cloud KMS auto-unseal is not implemented in Phase 7.
 
-### Current Blocker
+### Administrative Access Boundary
 
-Phase 7 infrastructure work is blocked until an administrative Vault authentication mechanism is available to Terraform through the current execution environment.
-
-Required environment:
-
-- `VAULT_ADDR`
-- `VAULT_TOKEN`
-
-The token must be supplied externally and must not be pasted into chat or committed to the repository.
+Terraform and operational acceptance used `VAULT_ADDR` and `VAULT_TOKEN` supplied from protected local material outside the repository. The token was not copied into Git, Terraform variables, Helm values, Kubernetes manifests, documentation, or helper scripts.
 
 ## Production Agent Access Control - Deferred
 

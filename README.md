@@ -84,7 +84,22 @@ Runtime acceptance verified:
 - Leader resilience: `vault-0` restarted, another peer became leader during disruption, `vault-0` recovered, and final peer count returned to 3
 - Argo CD self-heal: a metadata-only drift on the Vault Service label was detected as `OutOfSync`; Argo restored the Git value and returned `vault-primary` to `Synced` and `Healthy`
 
-Vault does not manage application secrets yet. The application still uses Kubernetes Secrets and reports `secret_source: kubernetes-secret`. Kubernetes Auth, policies, KV, PKI, database secrets, Vault Agent, VSO, CSI, backups, DR restore, and failover are intentionally deferred.
+Phase 7 migrates only the `orders-service` `API_KEY` to Vault KV v2 and syncs it back to Kubernetes with the official HashiCorp Vault Secrets Operator. `DB_USERNAME` and `DB_PASSWORD` remain in the existing Kubernetes Secret until a later database secrets phase. Dynamic database credentials, PKI, mTLS, Vault Agent, CSI, cloud KMS, backups, restore, failover, MCP, and Phase 8 work remain intentionally deferred.
+
+Phase 7 acceptance completed at Git revision `c779346fdf7ceee94ebf37e2846ea342a0c5ae4e`:
+
+- Argo CD Applications `orders-service-primary`, `orders-service-recovery`, `vault-primary`, `vault-recovery`, and `vault-secrets-operator-primary` were `Synced` and `Healthy`.
+- `VaultConnection`, `VaultAuth`, and `VaultStaticSecret` were present and healthy in the `orders` namespace.
+- VSO created `orders-service-vault-credentials` with the expected `API_KEY` key; values were not printed.
+- `orders-service` reads `API_KEY` from `orders-service-vault-credentials` and continues to read `DB_USERNAME` and `DB_PASSWORD` from `orders-service-credentials`.
+- Vault Kubernetes Auth allowed the `orders/orders-service-vso` identity to read only the exact KV v2 path and denied the wrong ServiceAccount, wrong namespace, unrelated path, write, delete, and admin operations.
+- Controlled `API_KEY` rotation in Vault updated the VSO-managed Kubernetes Secret and kept `orders-service` healthy.
+- `orders-service` and the VSO controller both restarted successfully.
+- Argo CD restored a safe replica-count drift to the Git-desired state.
+- Terraform detected and restored a controlled non-secret Vault role drift; final plan reported no changes.
+- Rollback was verified with a temporary legacy Secret reference, then final state was restored to the VSO-backed `API_KEY` path.
+- Application regression passed for `frontend-service` -> `orders-service`, `consumer-service` -> `orders-service`, `orders-service` -> PostgreSQL, and Traefik ingress HTTP 200.
+- Vault HA/Raft regression reported 3 initialized and unsealed replicas, HA enabled, 3 Raft voters, 1 leader, and 2 followers.
 
 ## Local Vault Unseal Helper
 
