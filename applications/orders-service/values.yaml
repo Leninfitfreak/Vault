@@ -7,8 +7,8 @@ global:
   managedBy: helm
   labels:
     app.kubernetes.io/part-of: orders-service
-    platform.hashicorp.com/phase: "7"
-    platform.hashicorp.com/secret-state: vault-secrets-operator
+    platform.hashicorp.com/phase: "1"
+    platform.hashicorp.com/secret-state: kubernetes-secrets
 
 images:
   application:
