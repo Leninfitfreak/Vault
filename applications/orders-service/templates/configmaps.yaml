@@ -9,10 +9,22 @@ data:
   server.py: |
     import json
     import os
+    import ssl
     import urllib.request
     from http.server import BaseHTTPRequestHandler, HTTPServer
 
     orders_url = os.getenv("ORDERS_SERVICE_URL", "http://orders-service:8080")
+    mtls_enabled = os.getenv("MTLS_ENABLED", "false").lower() == "true"
+    client_cert_file = os.getenv("MTLS_CLIENT_CERT_FILE")
+    client_key_file = os.getenv("MTLS_CLIENT_KEY_FILE")
+    ca_file = os.getenv("MTLS_CA_FILE")
+
+    def open_orders(path):
+        if mtls_enabled:
+            context = ssl.create_default_context(cafile=ca_file)
+            context.load_cert_chain(certfile=client_cert_file, keyfile=client_key_file)
+            return urllib.request.urlopen(f"{orders_url}{path}", timeout=3, context=context)
+        return urllib.request.urlopen(f"{orders_url}{path}", timeout=3)
 
     class Handler(BaseHTTPRequestHandler):
         def _send(self, code, payload):
@@ -28,9 +40,9 @@ data:
                 self._send(200, {"service": "frontend-service", "status": "ok"})
                 return
             try:
-                with urllib.request.urlopen(f"{orders_url}/orders", timeout=3) as response:
+                with open_orders("/orders") as response:
                     orders = json.loads(response.read().decode())
-                self._send(200, {"service": "frontend-service", "orders_service": orders})
+                self._send(200, {"service": "frontend-service", "orders_service": orders, "mtls_enabled": mtls_enabled})
             except Exception as exc:
                 self._send(503, {"service": "frontend-service", "orders_service_error": str(exc)})
 
@@ -48,6 +60,8 @@ data:
     import json
     import os
     import socket
+    import ssl
+    import threading
     from http.server import BaseHTTPRequestHandler, HTTPServer
 
     def database_probe():
@@ -81,14 +95,31 @@ data:
                     self._send(503, {"service": "orders-service", "database_error": str(exc)})
                 return
             if self.path == "/orders":
+                client_cert = self.connection.getpeercert() if hasattr(self.connection, "getpeercert") else None
                 self._send(200, {
                     "service": "orders-service",
                     "orders": [{"id": "order-1001", "status": "created"}],
                     "secret_source": "kubernetes-secret",
                     "database": database_probe(),
+                    "mtls": bool(client_cert),
                 })
                 return
             self._send(404, {"error": "not found"})
+
+    def run_mtls_server():
+        context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        context.verify_mode = ssl.CERT_REQUIRED
+        context.load_cert_chain(
+            certfile=os.getenv("MTLS_SERVER_CERT_FILE"),
+            keyfile=os.getenv("MTLS_SERVER_KEY_FILE"),
+        )
+        context.load_verify_locations(cafile=os.getenv("MTLS_CA_FILE"))
+        server = HTTPServer(("", int(os.getenv("MTLS_PORT", "8443"))), Handler)
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        server.serve_forever()
+
+    if os.getenv("MTLS_ENABLED", "false").lower() == "true":
+        threading.Thread(target=run_mtls_server, daemon=True).start()
 
     HTTPServer(("", 8080), Handler).serve_forever()
 ---

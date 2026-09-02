@@ -63,6 +63,38 @@ variable "database_secrets" {
   }
 }
 
+variable "pki" {
+  description = "Vault PKI configuration for service-to-service mTLS."
+  type = object({
+    mounts = map(object({
+      description           = string
+      default_ttl_seconds   = number
+      max_ttl_seconds       = number
+      ca_common_name        = string
+      ca_ttl                = string
+      organization          = string
+      issuing_certificates  = list(string)
+      crl_distribution_urls = list(string)
+    }))
+    roles = map(object({
+      mount              = string
+      allowed_domains    = list(string)
+      allow_bare_domains = bool
+      allow_subdomains   = bool
+      server_flag        = bool
+      client_flag        = bool
+      key_type           = string
+      key_bits           = number
+      ttl                = string
+      max_ttl            = string
+    }))
+  })
+  default = {
+    mounts = {}
+    roles  = {}
+  }
+}
+
 variable "kubernetes_auth" {
   description = "Kubernetes auth configuration for this environment."
   type = object({

@@ -15,4 +15,9 @@ spec:
     - name: http
       port: {{ .Values.orders.port }}
       targetPort: http
+{{- if .Values.orders.mtls.enabled }}
+    - name: https-mtls
+      port: {{ .Values.orders.mtls.port }}
+      targetPort: https-mtls
+{{- end }}
 {{- end }}

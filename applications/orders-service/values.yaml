@@ -54,11 +54,38 @@ secrets:
     path: creds/orders-service-db
     destinationName: orders-service-database-credentials
     renewalPercent: 67
+  pki:
+    enabled: true
+    mount: pki
+    renewalOffset: 120s
+    serverRole: orders-service-server
+    serverCommonName: orders-service.orders.svc.cluster.local
+    serverAltNames:
+      - orders-service
+      - orders-service.orders
+      - orders-service.orders.svc
+      - orders-service.orders.svc.cluster.local
+    serverDestinationName: orders-service-mtls-server
+    clientRole: frontend-service-client
+    clientCommonName: frontend-service.orders.svc.cluster.local
+    clientAltNames:
+      - frontend-service
+      - frontend-service.orders
+      - frontend-service.orders.svc
+      - frontend-service.orders.svc.cluster.local
+    clientDestinationName: frontend-service-mtls-client
 
 frontend:
   name: frontend-service
   replicas: 1
   port: 8080
+  mtls:
+    enabled: true
+    ordersUrl: https://orders-service:8443
+    certMountPath: /var/run/orders-mtls/client
+    caFile: /var/run/orders-mtls/client/tls.crt
+    certFile: /var/run/orders-mtls/client/tls.crt
+    keyFile: /var/run/orders-mtls/client/tls.key
   resources:
     requests:
       cpu: 25m
@@ -71,6 +98,13 @@ orders:
   name: orders-service
   replicas: 1
   port: 8080
+  mtls:
+    enabled: true
+    port: 8443
+    certMountPath: /var/run/orders-mtls/server
+    caFile: /var/run/orders-mtls/server/tls.crt
+    certFile: /var/run/orders-mtls/server/tls.crt
+    keyFile: /var/run/orders-mtls/server/tls.key
   resources:
     requests:
       cpu: 25m

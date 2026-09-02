@@ -29,6 +29,20 @@ policies = {
       }
     EOT
   }
+  orders-service-pki-server-issue = {
+    rules = <<-EOT
+      path "pki/issue/orders-service-server" {
+        capabilities = ["update"]
+      }
+    EOT
+  }
+  frontend-service-pki-client-issue = {
+    rules = <<-EOT
+      path "pki/issue/frontend-service-client" {
+        capabilities = ["update"]
+      }
+    EOT
+  }
 }
 
 kv_v2_mounts = {
@@ -82,6 +96,48 @@ database_secrets = {
   }
 }
 
+pki = {
+  mounts = {
+    pki = {
+      description           = "Local POC PKI for orders-service mTLS certificates"
+      default_ttl_seconds   = 300
+      max_ttl_seconds       = 3600
+      ca_common_name        = "Vault Local POC Root CA"
+      ca_ttl                = "24h"
+      organization          = "Local Vault POC"
+      issuing_certificates  = ["http://vault.vault.svc.cluster.local:8200/v1/pki/ca"]
+      crl_distribution_urls = ["http://vault.vault.svc.cluster.local:8200/v1/pki/crl"]
+    }
+  }
+
+  roles = {
+    orders-service-server = {
+      mount              = "pki"
+      allowed_domains    = ["orders-service", "orders-service.orders", "orders-service.orders.svc", "orders-service.orders.svc.cluster.local"]
+      allow_bare_domains = true
+      allow_subdomains   = false
+      server_flag        = true
+      client_flag        = false
+      key_type           = "rsa"
+      key_bits           = 2048
+      ttl                = "300"
+      max_ttl            = "600"
+    }
+    frontend-service-client = {
+      mount              = "pki"
+      allowed_domains    = ["frontend-service", "frontend-service.orders", "frontend-service.orders.svc", "frontend-service.orders.svc.cluster.local"]
+      allow_bare_domains = true
+      allow_subdomains   = false
+      server_flag        = false
+      client_flag        = true
+      key_type           = "rsa"
+      key_bits           = 2048
+      ttl                = "300"
+      max_ttl            = "600"
+    }
+  }
+}
+
 kubernetes_auth = {
   enabled              = true
   backend_path         = "kubernetes"
@@ -100,7 +156,7 @@ kubernetes_auth = {
     orders-service-vso = {
       bound_service_account_names      = ["orders-service-vso"]
       bound_service_account_namespaces = ["orders"]
-      token_policies                   = ["orders-service-api-key-read", "orders-service-database-credentials-read"]
+      token_policies                   = ["orders-service-api-key-read", "orders-service-database-credentials-read", "orders-service-pki-server-issue", "frontend-service-pki-client-issue"]
       token_ttl                        = 600
       token_max_ttl                    = 1800
       audience                         = "vault"

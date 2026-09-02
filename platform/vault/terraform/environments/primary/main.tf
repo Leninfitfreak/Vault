@@ -19,6 +19,13 @@ module "database_secrets" {
   bootstrap_password = var.database_bootstrap_password
 }
 
+module "pki" {
+  source = "../../modules/pki"
+
+  mounts = var.pki.mounts
+  roles  = var.pki.roles
+}
+
 module "kubernetes_auth" {
   count  = var.kubernetes_auth.enabled ? 1 : 0
   source = "../../modules/kubernetes-auth"

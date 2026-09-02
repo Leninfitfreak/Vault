@@ -30,6 +30,10 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.orders.port }}
+{{- if .Values.orders.mtls.enabled }}
+            - name: https-mtls
+              containerPort: {{ .Values.orders.mtls.port }}
+{{- end }}
           env:
             - name: API_KEY
               valueFrom:
@@ -60,6 +64,18 @@ spec:
               value: {{ .Values.postgresql.name }}
             - name: POSTGRESQL_PORT
               value: {{ .Values.postgresql.port | quote }}
+            - name: MTLS_ENABLED
+              value: {{ .Values.orders.mtls.enabled | quote }}
+{{- if .Values.orders.mtls.enabled }}
+            - name: MTLS_PORT
+              value: {{ .Values.orders.mtls.port | quote }}
+            - name: MTLS_CA_FILE
+              value: {{ .Values.orders.mtls.caFile | quote }}
+            - name: MTLS_SERVER_CERT_FILE
+              value: {{ .Values.orders.mtls.certFile | quote }}
+            - name: MTLS_SERVER_KEY_FILE
+              value: {{ .Values.orders.mtls.keyFile | quote }}
+{{- end }}
           readinessProbe:
             httpGet:
               path: /health
@@ -81,10 +97,20 @@ spec:
               mountPath: /app
             - name: tmp
               mountPath: /tmp
+{{- if .Values.orders.mtls.enabled }}
+            - name: mtls-server
+              mountPath: {{ .Values.orders.mtls.certMountPath }}
+              readOnly: true
+{{- end }}
       volumes:
         - name: app
           configMap:
             name: {{ .Values.orders.name }}-app
         - name: tmp
           emptyDir: {}
+{{- if .Values.orders.mtls.enabled }}
+        - name: mtls-server
+          secret:
+            secretName: {{ .Values.secrets.pki.serverDestinationName }}
+{{- end }}
 {{- end }}

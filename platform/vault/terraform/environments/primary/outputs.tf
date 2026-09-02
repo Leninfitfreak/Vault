@@ -23,6 +23,16 @@ output "database_role_names" {
   value       = module.database_secrets.role_names
 }
 
+output "pki_mount_paths" {
+  description = "Terraform-managed PKI mount paths."
+  value       = module.pki.mount_paths
+}
+
+output "pki_role_names" {
+  description = "Terraform-managed PKI role names."
+  value       = module.pki.role_names
+}
+
 output "kubernetes_auth_path" {
   description = "Kubernetes auth path when enabled."
   value       = try(module.kubernetes_auth[0].backend_path, null)

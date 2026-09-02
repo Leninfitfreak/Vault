@@ -32,7 +32,17 @@ spec:
               containerPort: {{ .Values.frontend.port }}
           env:
             - name: ORDERS_SERVICE_URL
-              value: http://{{ .Values.orders.name }}:{{ .Values.orders.port }}
+              value: {{ ternary .Values.frontend.mtls.ordersUrl (printf "http://%s:%v" .Values.orders.name .Values.orders.port) .Values.frontend.mtls.enabled | quote }}
+            - name: MTLS_ENABLED
+              value: {{ .Values.frontend.mtls.enabled | quote }}
+{{- if .Values.frontend.mtls.enabled }}
+            - name: MTLS_CA_FILE
+              value: {{ .Values.frontend.mtls.caFile | quote }}
+            - name: MTLS_CLIENT_CERT_FILE
+              value: {{ .Values.frontend.mtls.certFile | quote }}
+            - name: MTLS_CLIENT_KEY_FILE
+              value: {{ .Values.frontend.mtls.keyFile | quote }}
+{{- end }}
           readinessProbe:
             httpGet:
               path: /health
@@ -54,10 +64,20 @@ spec:
               mountPath: /app
             - name: tmp
               mountPath: /tmp
+{{- if .Values.frontend.mtls.enabled }}
+            - name: mtls-client
+              mountPath: {{ .Values.frontend.mtls.certMountPath }}
+              readOnly: true
+{{- end }}
       volumes:
         - name: app
           configMap:
             name: {{ .Values.frontend.name }}-app
         - name: tmp
           emptyDir: {}
+{{- if .Values.frontend.mtls.enabled }}
+        - name: mtls-client
+          secret:
+            secretName: {{ .Values.secrets.pki.clientDestinationName }}
+{{- end }}
 {{- end }}
