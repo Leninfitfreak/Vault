@@ -84,7 +84,7 @@ Runtime acceptance verified:
 - Leader resilience: `vault-0` restarted, another peer became leader during disruption, `vault-0` recovered, and final peer count returned to 3
 - Argo CD self-heal: a metadata-only drift on the Vault Service label was detected as `OutOfSync`; Argo restored the Git value and returned `vault-primary` to `Synced` and `Healthy`
 
-Phase 7 migrates only the `orders-service` `API_KEY` to Vault KV v2 and syncs it back to Kubernetes with the official HashiCorp Vault Secrets Operator. `DB_USERNAME` and `DB_PASSWORD` remain in the existing Kubernetes Secret until a later database secrets phase. Dynamic database credentials, PKI, mTLS, Vault Agent, CSI, cloud KMS, backups, restore, failover, MCP, and Phase 8 work remain intentionally deferred.
+Phase 7 migrated only the `orders-service` `API_KEY` to Vault KV v2 and syncs it back to Kubernetes with the official HashiCorp Vault Secrets Operator.
 
 Phase 7 acceptance completed at Git revision `c779346fdf7ceee94ebf37e2846ea342a0c5ae4e`:
 
@@ -100,6 +100,23 @@ Phase 7 acceptance completed at Git revision `c779346fdf7ceee94ebf37e2846ea342a0
 - Rollback was verified with a temporary legacy Secret reference, then final state was restored to the VSO-backed `API_KEY` path.
 - Application regression passed for `frontend-service` -> `orders-service`, `consumer-service` -> `orders-service`, `orders-service` -> PostgreSQL, and Traefik ingress HTTP 200.
 - Vault HA/Raft regression reported 3 initialized and unsealed replicas, HA enabled, 3 Raft voters, 1 leader, and 2 followers.
+
+Phase 8 migrates `orders-service` database credential consumption to Vault dynamic database credentials while leaving PostgreSQL bootstrap credentials in the existing Kubernetes Secret. VSO now syncs a renewable runtime Secret named `orders-service-database-credentials` with `DB_USERNAME` and `DB_PASSWORD`; those generated values are not stored in Git or Terraform state.
+
+Phase 8 acceptance completed at Git revision `fd217d1d1652dea9f5c494ac4ad56ffa4151f99d`:
+
+- Argo CD Applications `orders-service-primary`, `orders-service-recovery`, `vault-primary`, `vault-recovery`, and `vault-secrets-operator-primary` were `Synced` and `Healthy`.
+- `VaultDynamicSecret/orders-service-database` was `SecretSynced`, `Healthy`, and `Ready`.
+- `orders-service` reads `API_KEY` from `orders-service-vault-credentials` and reads `DB_USERNAME` and `DB_PASSWORD` from `orders-service-database-credentials`.
+- PostgreSQL still uses `orders-service-credentials` for bootstrap credentials; its PVC was not changed or deleted.
+- Vault Kubernetes Auth allowed the `orders/orders-service-vso` identity to read only `database/creds/orders-service-db` and denied the wrong ServiceAccount, wrong namespace, unrelated paths, writes, deletes, and admin operations.
+- Controlled dynamic credential rotation replaced the generated database credential, changed only non-sensitive Secret metadata/hash evidence, and kept `orders-service` healthy.
+- `orders-service`, the VSO controller, one Vault server pod, and PostgreSQL were restarted successfully without resetting Vault or touching PVCs.
+- Argo CD restored a safe frontend replica-count drift to the Git-desired state.
+- Terraform detected and restored a controlled non-secret Vault database role TTL drift; final plan reported no changes.
+- Rollback was verified by temporarily using the preserved static DB Secret references, then final state was restored to the VSO-backed dynamic DB Secret.
+- Application regression passed for `frontend-service` -> `orders-service`, `consumer-service` -> `orders-service`, `orders-service` -> PostgreSQL, and Traefik ingress HTTP 200.
+- Vault HA/Raft regression reported 3 initialized and unsealed replicas, HA enabled, 3 Raft peers, and 3 voters.
 
 ## Local Vault Unseal Helper
 

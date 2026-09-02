@@ -4,7 +4,7 @@
 
 Phase 1 establishes the before-Vault state for a reusable enterprise Kubernetes application foundation. Minikube is used only as a local substitute for real Kubernetes clusters such as AKS, EKS, GKE, OpenShift, or another conformant Kubernetes platform.
 
-Phase 2 adds Argo CD as the GitOps reconciler. This project still does not install Vault, Terraform, CI/CD, PKI, VSO, CSI, Vault Agent, dynamic database credentials, backup, restore, failover automation, MCP, or production agent access controls.
+Phase 2 adds Argo CD as the GitOps reconciler. Later accepted phases add Vault HA with integrated Raft, Terraform-managed Vault logical configuration, Kubernetes Auth, KV v2 delivery for `API_KEY`, and Vault dynamic database credentials for `orders-service`. CI/CD, PKI, VSO alternatives such as CSI or Vault Agent, cloud KMS, backup, restore, failover automation, MCP, and production agent access controls remain deferred unless a later phase explicitly implements them.
 
 ## Current Architecture
 
@@ -24,7 +24,7 @@ K8s Secrets  PostgreSQL
 consumer-service
 ```
 
-`orders-service` is the primary future Vault consumer. It currently reads an API credential and static PostgreSQL username/password from Kubernetes Secrets.
+`orders-service` is the primary Vault consumer. It reads `API_KEY` from a VSO-managed Kubernetes Secret backed by Vault KV v2, and it reads runtime PostgreSQL credentials from a VSO-managed Kubernetes Secret backed by Vault Database Secrets Engine.
 
 ## Environment Architecture
 
@@ -35,16 +35,20 @@ Both Minikube profiles are healthy and use Kubernetes `v1.35.1` with the Docker 
 
 ## Existing Credential Model
 
-Phase 1 intentionally uses ordinary Kubernetes Secrets:
+The original Phase 1 baseline used ordinary Kubernetes Secrets. After Phase 8, the active primary credential model is:
 
 - `orders-service-credentials`
-  - `API_KEY`
-  - `DB_USERNAME`
-  - `DB_PASSWORD`
+  - PostgreSQL bootstrap `DB_USERNAME`
+  - PostgreSQL bootstrap `DB_PASSWORD`
 - `external-service-credentials`
   - `EXTERNAL_API_TOKEN`
+- `orders-service-vault-credentials`
+  - runtime `API_KEY` synced by VSO from Vault KV v2
+- `orders-service-database-credentials`
+  - runtime `DB_USERNAME` synced by VSO from Vault Database Secrets Engine
+  - runtime `DB_PASSWORD` synced by VSO from Vault Database Secrets Engine
 
-All values are fake local-only values. Real production secret values must never be committed to Git.
+Secret values are not printed in documentation. Real production secret values must never be committed to Git.
 
 ## Helm Model
 
@@ -100,13 +104,13 @@ Connectivity verified:
 
 Secret consumption was verified without printing values:
 
-- `orders-service` references `orders-service-credentials/API_KEY`
-- `orders-service` references `orders-service-credentials/DB_USERNAME`
-- `orders-service` references `orders-service-credentials/DB_PASSWORD`
+- `orders-service` references `orders-service-vault-credentials/API_KEY`
+- `orders-service` references `orders-service-database-credentials/DB_USERNAME`
+- `orders-service` references `orders-service-database-credentials/DB_PASSWORD`
 - `postgresql` references `orders-service-credentials/DB_USERNAME`
 - `postgresql` references `orders-service-credentials/DB_PASSWORD`
 
-No Vault or Argo CD Helm releases or namespaces were found.
+Vault, Argo CD, and Vault Secrets Operator are present in the primary platform after the accepted GitOps and Vault phases.
 
 ## Tool Versions
 
@@ -1539,7 +1543,7 @@ Phase 7 did not implement:
 - DR/failover automation
 - CI/CD secret provisioning
 - MCP
-- Phase 8
+Phase 8 was later implemented as the dynamic database credential phase. The Phase 7 boundary remains valid for the Phase 7 checkpoint only.
 
 ### Local Unseal Model
 
@@ -1621,6 +1625,162 @@ Cloud KMS auto-unseal is not implemented in Phase 7.
 ### Administrative Access Boundary
 
 Terraform and operational acceptance used `VAULT_ADDR` and `VAULT_TOKEN` supplied from protected local material outside the repository. The token was not copied into Git, Terraform variables, Helm values, Kubernetes manifests, documentation, or helper scripts.
+
+## Phase 8 Dynamic Database Credentials Acceptance
+
+Phase 8 migrates only `orders-service` database credential consumption to Vault dynamic database credentials.
+
+The migration scope is intentionally narrow:
+
+- migrated: runtime `DB_USERNAME` and `DB_PASSWORD` consumed by `orders-service`
+- retained: PostgreSQL bootstrap credentials in `orders-service-credentials`
+- retained: Phase 7 `API_KEY` delivery through `orders-service-vault-credentials`
+- not implemented: PKI, mTLS, Vault Agent, CSI, cloud KMS, backup/restore, DR/failover, and Phase 9
+
+### Current Secret Model
+
+`orders-service` now consumes credentials through environment variables:
+
+- `API_KEY` from `orders-service-vault-credentials`, created by VSO from Vault KV v2
+- `DB_USERNAME` from `orders-service-database-credentials`, created by VSO from Vault Database Secrets Engine
+- `DB_PASSWORD` from `orders-service-database-credentials`, created by VSO from Vault Database Secrets Engine
+
+`postgresql` continues to consume bootstrap `DB_USERNAME` and `DB_PASSWORD` from `orders-service-credentials`.
+
+The active dynamic database pattern is:
+
+```text
+Vault Database Secrets Engine
+    |
+    v
+Vault Secrets Operator
+    |
+    v
+orders-service-database-credentials
+    |
+    v
+orders-service DB_USERNAME / DB_PASSWORD
+```
+
+Generated database passwords are not committed to Git and are not stored in Terraform state. Terraform uses an externally supplied write-only bootstrap password variable for the Vault database connection.
+
+### Runtime Result
+
+Accepted Git revision:
+
+```text
+fd217d1d1652dea9f5c494ac4ad56ffa4151f99d
+```
+
+Argo CD health:
+
+- `orders-service-primary`: `Synced` and `Healthy`
+- `orders-service-recovery`: `Synced` and `Healthy`, inactive as designed
+- `vault-primary`: `Synced` and `Healthy`
+- `vault-recovery`: `Synced` and `Healthy`
+- `vault-secrets-operator-primary`: `Synced` and `Healthy`
+
+VSO resources:
+
+- `VaultDynamicSecret/orders/orders-service-database`: `SecretSynced`, `Healthy`, and `Ready`
+- Destination Secret: `orders-service-database-credentials`
+- Destination keys: `DB_USERNAME` and `DB_PASSWORD` present
+- Secret values were not printed
+
+Recovery remains staged and inactive:
+
+- `vault-dr` has no workload pods for `orders-service`
+- `vault-dr` does not have VSO CRDs installed
+- dynamic database credentials were not created in recovery
+
+### Authorization Acceptance
+
+Vault Kubernetes Auth role:
+
+- role: `orders-service-vso`
+- bound ServiceAccount: `orders-service-vso`
+- bound namespace: `orders`
+- policies: `orders-service-api-key-read` and `orders-service-database-credentials-read`
+- allowed database path: `database/creds/orders-service-db`
+
+Verification result:
+
+- correct identity login: pass
+- database credential read: pass
+- wrong ServiceAccount: denied
+- wrong namespace: denied
+- unrelated database role: denied
+- database config read: denied
+- write: denied
+- delete: denied
+- admin access: denied
+- root policy attached to workload token: no
+
+### Rotation, Drift, Restart, And Rollback Acceptance
+
+Dynamic database credential rotation:
+
+- current dynamic lease was revoked through Vault
+- the revoked credential no longer authenticated
+- VSO issued a replacement credential
+- destination Secret resource version and non-sensitive data hash changed
+- replacement credential authenticated
+- `orders-service` rolled out and remained healthy
+
+Restart tests:
+
+- `orders-service` restart: pass
+- VSO controller restart: pass
+- one Vault server pod restart: pass; cluster returned to 3 of 3 unsealed replicas
+- PostgreSQL pod restart: pass; PVC was not touched
+
+Argo CD self-heal:
+
+- drift introduced: `frontend-service` replica count changed from 1 to 2
+- Argo CD detected `OutOfSync`
+- Argo CD restored the Git-desired replica count of 1
+- final state: `Synced` and `Healthy`
+
+Terraform drift:
+
+- drift introduced: Vault database role `max_ttl` changed from `3600s` to `3500s`
+- Terraform plan detected the drift
+- Terraform apply restored the Git-managed value
+- final Terraform plan: no changes
+
+Rollback:
+
+- `orders-service` was temporarily pointed back to preserved static DB Secret references
+- rollback rollout completed successfully
+- final state was restored to `orders-service-database-credentials`
+- Argo CD returned to `Synced` and `Healthy`
+
+### Application And Vault Regression
+
+Application regression:
+
+- `frontend-service` -> `orders-service`: HTTP 200
+- `consumer-service` -> `orders-service`: HTTP 200
+- `orders-service` -> PostgreSQL: TCP connectivity succeeded
+- Traefik ingress with host `orders.primary.local`: HTTP 200
+
+Vault HA/Raft regression:
+
+- replicas: 3
+- initialized: yes
+- unsealed: 3 of 3
+- HA enabled: yes
+- Raft peers: 3
+- Raft voters: 3
+
+### Phase 8 Security Result
+
+- generated DB password in Git: no
+- generated DB password in Terraform state: no
+- `API_KEY` in Git: no
+- Vault root token in Git: no
+- Shamir shares in Git: no
+- Secret values printed during acceptance: no
 
 ## Production Agent Access Control - Deferred
 
