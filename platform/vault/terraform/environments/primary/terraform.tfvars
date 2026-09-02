@@ -120,8 +120,8 @@ pki = {
       client_flag        = false
       key_type           = "rsa"
       key_bits           = 2048
-      ttl                = "300"
-      max_ttl            = "600"
+      ttl                = "900"
+      max_ttl            = "1800"
     }
     frontend-service-client = {
       mount              = "pki"
@@ -132,8 +132,8 @@ pki = {
       client_flag        = true
       key_type           = "rsa"
       key_bits           = 2048
-      ttl                = "300"
-      max_ttl            = "600"
+      ttl                = "900"
+      max_ttl            = "1800"
     }
   }
 }

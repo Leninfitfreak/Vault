@@ -57,7 +57,8 @@ secrets:
   pki:
     enabled: true
     mount: pki
-    renewalOffset: 120s
+    ttl: 15m
+    renewalOffset: 300s
     serverRole: orders-service-server
     serverCommonName: orders-service.orders.svc.cluster.local
     serverAltNames:
