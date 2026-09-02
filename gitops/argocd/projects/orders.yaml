@@ -51,4 +51,6 @@ spec:
     - group: secrets.hashicorp.com
       kind: VaultConnection
     - group: secrets.hashicorp.com
+      kind: VaultDynamicSecret
+    - group: secrets.hashicorp.com
       kind: VaultStaticSecret

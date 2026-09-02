@@ -8,6 +8,21 @@ output "kv_v2_mount_paths" {
   value       = keys(var.kv_v2_mounts)
 }
 
+output "database_secret_mount_paths" {
+  description = "Terraform-managed database secrets engine mount paths."
+  value       = module.database_secrets.mount_paths
+}
+
+output "database_connection_names" {
+  description = "Terraform-managed Vault database connection names."
+  value       = module.database_secrets.connection_names
+}
+
+output "database_role_names" {
+  description = "Terraform-managed Vault database dynamic role names."
+  value       = module.database_secrets.role_names
+}
+
 output "kubernetes_auth_path" {
   description = "Kubernetes auth path when enabled."
   value       = try(module.kubernetes_auth[0].backend_path, null)

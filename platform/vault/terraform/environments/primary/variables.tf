@@ -19,6 +19,50 @@ variable "kv_v2_mounts" {
   default = {}
 }
 
+variable "database_bootstrap_password" {
+  description = "Write-only PostgreSQL bootstrap password supplied externally for Vault database connection configuration."
+  type        = string
+  sensitive   = true
+  ephemeral   = true
+  default     = null
+}
+
+variable "database_secrets" {
+  description = "Vault database secrets engine configuration for dynamic database credentials."
+  type = object({
+    mounts = map(object({
+      description               = string
+      default_lease_ttl_seconds = number
+      max_lease_ttl_seconds     = number
+    }))
+    connections = map(object({
+      mount                   = string
+      plugin_name             = string
+      allowed_roles           = list(string)
+      verify_connection       = bool
+      connection_url          = string
+      username                = string
+      password_wo_version     = number
+      max_open_connections    = optional(number)
+      max_idle_connections    = optional(number)
+      max_connection_lifetime = optional(number)
+    }))
+    roles = map(object({
+      mount                 = string
+      db_name               = string
+      creation_statements   = list(string)
+      revocation_statements = list(string)
+      default_ttl           = number
+      max_ttl               = number
+    }))
+  })
+  default = {
+    mounts      = {}
+    connections = {}
+    roles       = {}
+  }
+}
+
 variable "kubernetes_auth" {
   description = "Kubernetes auth configuration for this environment."
   type = object({

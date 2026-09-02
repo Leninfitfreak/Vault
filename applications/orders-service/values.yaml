@@ -47,6 +47,13 @@ secrets:
     path: primary/orders/orders-service/application
     destinationName: orders-service-vault-credentials
     refreshAfter: 30s
+  dynamicDatabase:
+    enabled: true
+    roleName: orders-service-db
+    mount: database
+    path: creds/orders-service-db
+    destinationName: orders-service-database-credentials
+    renewalPercent: 67
 
 frontend:
   name: frontend-service
