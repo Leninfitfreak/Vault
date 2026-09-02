@@ -31,8 +31,8 @@ secrets:
   create: true
   ordersCredentials:
     name: orders-service-credentials
-    databaseUsername: orders_user
-    databasePassword: fake-local-orders-password
+    databaseUsername: ""
+    databasePassword: ""
   externalCredentials:
     name: external-service-credentials
     externalApiToken: fake-local-external-api-token
